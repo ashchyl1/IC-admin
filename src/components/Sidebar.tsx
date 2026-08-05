@@ -1,7 +1,16 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, ListChecks, Building2, ArrowLeftRight, LineChart, Crosshair, CalendarRange } from "lucide-react";
+import {
+  LayoutDashboard,
+  ListChecks,
+  Building2,
+  ArrowLeftRight,
+  LineChart,
+  Crosshair,
+  CalendarRange,
+  CandlestickChart,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
@@ -12,6 +21,16 @@ const NAV = [
   { href: "/stocks", label: "Stocks", icon: Building2 },
   { href: "/strike-selector", label: "Strike Selector", icon: Crosshair },
   { href: "/import-export", label: "Import / Export", icon: ArrowLeftRight },
+];
+
+/**
+ * Kept in its own group because it is a different kind of destination: a
+ * full-width workspace with its own chrome and its own Supabase login, not
+ * another page inside this sidebar shell. Grouping it separately sets that
+ * expectation before the click rather than after.
+ */
+const WORKSPACES = [
+  { href: "/paper-trading", label: "Paper Trading", icon: CandlestickChart },
 ];
 
 export function Sidebar() {
@@ -39,6 +58,30 @@ export function Sidebar() {
               className={cn(
                 "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"
+              )}
+            >
+              <Icon className="h-4 w-4" />
+              {item.label}
+            </Link>
+          );
+        })}
+
+        <div className="px-3 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Workspaces
+        </div>
+        {WORKSPACES.map((item) => {
+          const active = pathname.startsWith(item.href);
+          const Icon = item.icon;
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              aria-current={active ? "page" : undefined}
+              className={cn(
+                "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                active
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground"
               )}
             >
               <Icon className="h-4 w-4" />
