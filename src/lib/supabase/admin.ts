@@ -2,6 +2,7 @@ import "server-only";
 
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "./types";
+import { createResilientFetch } from "./resilient-fetch";
 
 /**
  * Service-role client. SERVER ONLY -- the `server-only` import above makes the
@@ -22,5 +23,9 @@ export function createAdminClient() {
 
   return createSupabaseClient<Database>(process.env.NEXT_PUBLIC_SUPABASE_URL!, key, {
     auth: { persistSession: false, autoRefreshToken: false },
+    // Local antivirus TLS interception drops roughly one connection in three
+    // to Supabase. Retries connect-phase failures only, so a write is never
+    // replayed once it might already have landed. See ./resilient-fetch.
+    global: { fetch: createResilientFetch() },
   });
 }
