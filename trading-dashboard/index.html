@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IndiaCharts Trading System — Dashboard</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%23f0b429'/><text x='50' y='72' font-size='60' text-anchor='middle' fill='%231a1200' font-family='monospace' font-weight='bold'>IC</text></svg>" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="logo">
+          <span class="mark">IC</span>
+          <span>IndiaCharts</span>
+        </div>
+        <div class="sub">Trading System Analysis · v2</div>
+      </div>
+      <nav class="nav" id="nav"></nav>
+      <div class="nav-footer">
+        Generated 20-Jul-2026 · 340 records<br />
+        Stated-price basis · not OHLCV-verified
+      </div>
+    </aside>
+    <div class="scrim" id="scrim"></div>
+
+    <div class="main">
+      <header class="topbar">
+        <button class="menu-toggle" id="menuToggle">☰</button>
+        <div>
+          <div class="page-title" id="pageTitle">Overview</div>
+          <div class="page-desc" id="pageDesc"></div>
+        </div>
+        <div class="spacer"></div>
+        <div class="stat-pill">Lifecycles <b>150</b></div>
+        <div class="stat-pill">Closed <b>141</b></div>
+        <div class="stat-pill">Win rate (det.) <b>63%</b></div>
+      </header>
+      <main class="content" id="content"></main>
+    </div>
+  </div>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

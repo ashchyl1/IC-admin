@@ -1,0 +1,178 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 210 20% 98%;
+  --foreground: 222 47% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --muted: 210 20% 96%;
+  --muted-foreground: 215 16% 47%;
+  --border: 214 20% 90%;
+  --input: 214 20% 88%;
+  --ring: 221 83% 53%;
+  --primary: 221 83% 53%;
+  --primary-foreground: 0 0% 100%;
+  --accent: 210 20% 94%;
+  --accent-foreground: 222 47% 11%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+  --radius: 0.6rem;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.dark {
+  --background: 222 47% 8%;
+  --foreground: 210 20% 96%;
+  --card: 222 40% 11%;
+  --card-foreground: 210 20% 96%;
+  --muted: 217 33% 15%;
+  --muted-foreground: 215 20% 65%;
+  --border: 217 33% 18%;
+  --input: 217 33% 20%;
+  --ring: 221 83% 60%;
+  --primary: 217 91% 60%;
+  --primary-foreground: 222 47% 11%;
+  --accent: 217 33% 17%;
+  --accent-foreground: 210 20% 96%;
+  --destructive: 0 63% 45%;
+  --destructive-foreground: 0 0% 100%;
+}
+
+/* ---------------------------------------------------------------------------
+   Zerodha Kite light theme, scoped to the Nifty weekly page.
+
+   Redefining the same custom properties inside a wrapper means every existing
+   Tailwind token (bg-card, text-muted-foreground, border, ...) repaints itself
+   in Kite's palette with no per-element overrides -- and nothing outside the
+   wrapper changes. Kite's hallmarks: near-white surfaces, hairline #e5e5e5
+   rules, a 3px radius, #387ed1 blue, and grey rather than black body text.
+--------------------------------------------------------------------------- */
+.kite-theme {
+  --background: 0 0% 98%;        /* #f9f9f9 page */
+  --foreground: 0 0% 27%;        /* #444    body text */
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 27%;
+  --muted: 0 0% 98%;
+  --muted-foreground: 0 0% 61%;  /* #9b9b9b labels */
+  --border: 0 0% 90%;            /* #e5e5e5 hairlines */
+  --input: 0 0% 88%;
+  --ring: 213 62% 52%;
+  --primary: 213 62% 52%;        /* #387ed1 Kite blue */
+  --primary-foreground: 0 0% 100%;
+  --accent: 0 0% 96%;            /* #f5f5f5 hover */
+  --accent-foreground: 0 0% 27%;
+  --destructive: 14 100% 57%;    /* #ff5722 Kite sell */
+  --destructive-foreground: 0 0% 100%;
+  --radius: 3px;
+  --kite-buy: 122 39% 49%;       /* #4caf50 */
+  --kite-sell: 14 100% 57%;      /* #ff5722 */
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", sans-serif;
+}
+
+/* body{color} was already computed against the *global* --foreground, and
+   redefining the variable here does not recompute an inherited value -- so the
+   wrapper needs its own colour for descendants to inherit Kite's grey rather
+   than the app's near-black.
+   :where() keeps this at zero specificity. At plain `.kite-theme` it ties with
+   Tailwind's utilities and, being defined after them, silently beat every
+   `bg-card` / `text-*` on the same element -- which repainted the modal panels
+   in the page background. Backgrounds are left to the utilities entirely. */
+:where(.kite-theme) {
+  color: hsl(var(--foreground));
+}
+
+/* Kite ships a dark mode too, so the app's existing toggle keeps working
+   rather than stranding this page on a white card inside a dark shell. */
+.dark .kite-theme {
+  --background: 0 0% 10%;
+  --foreground: 0 0% 86%;
+  --card: 0 0% 14%;
+  --card-foreground: 0 0% 86%;
+  --muted: 0 0% 16%;
+  --muted-foreground: 0 0% 54%;
+  --border: 0 0% 20%;
+  --input: 0 0% 24%;
+  --primary: 213 62% 58%;
+  --accent: 0 0% 18%;
+  --accent-foreground: 0 0% 86%;
+}
+
+/* Kite sets prices in tabular figures so digits don't jitter between rows. */
+.kite-num {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* The small grey caption above every value block on a Kite panel. */
+.kite-label {
+  font-size: 11px;
+  line-height: 1.2;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Rendered markdown in the summary preview */
+.prose-summary h1 { font-size: 1.35rem; font-weight: 700; margin: 0.6em 0 0.3em; }
+.prose-summary h2 { font-size: 1.15rem; font-weight: 700; margin: 0.6em 0 0.3em; }
+.prose-summary h3 { font-size: 1rem; font-weight: 600; margin: 0.5em 0 0.3em; }
+.prose-summary p { margin: 0.5em 0; line-height: 1.6; }
+.prose-summary ul { list-style: disc; padding-left: 1.4em; margin: 0.5em 0; }
+.prose-summary ol { list-style: decimal; padding-left: 1.4em; margin: 0.5em 0; }
+.prose-summary li { margin: 0.2em 0; }
+.prose-summary a { color: hsl(var(--primary)); text-decoration: underline; }
+.prose-summary code { background: hsl(var(--muted)); padding: 0.1em 0.35em; border-radius: 4px; font-size: 0.9em; }
+.prose-summary blockquote { border-left: 3px solid hsl(var(--primary)); background: hsl(var(--muted) / 0.5); padding: 0.5em 0.9em; border-radius: 0 6px 6px 0; color: hsl(var(--foreground)); margin: 0.7em 0; }
+.prose-summary blockquote p { margin: 0.2em 0; }
+.prose-summary strong { font-weight: 700; }
+.prose-summary em { font-style: italic; }
+.prose-summary del { text-decoration: line-through; opacity: 0.7; }
+.prose-summary hr { border: 0; border-top: 1px solid hsl(var(--border)); margin: 1em 0; }
+.prose-summary mark { background: hsl(48 96% 76%); color: #422006; padding: 0.05em 0.3em; border-radius: 3px; }
+.prose-summary img { max-width: 100%; border-radius: 6px; border: 1px solid hsl(var(--border)); margin: 0.5em 0; }
+
+/* Tables (GFM) */
+.prose-summary table { border-collapse: collapse; width: 100%; margin: 0.8em 0; font-size: 0.9em; display: block; overflow-x: auto; }
+.prose-summary th, .prose-summary td { border: 1px solid hsl(var(--border)); padding: 0.45em 0.7em; text-align: left; vertical-align: top; }
+.prose-summary thead th { background: hsl(var(--muted)); font-weight: 700; }
+.prose-summary tbody tr:nth-child(even) { background: hsl(var(--muted) / 0.4); }
+
+/* Task lists */
+.prose-summary input[type="checkbox"] { margin-right: 0.45em; vertical-align: middle; accent-color: hsl(var(--primary)); }
+.prose-summary li.task-list-item, .prose-summary li:has(> input[type="checkbox"]) { list-style: none; margin-left: -1em; }
+
+/* Checkboxes: theme accent colour + a consistent, slightly larger hit size */
+input[type="checkbox"] {
+  accent-color: hsl(var(--primary));
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+input[type="checkbox"]:disabled {
+  cursor: default;
+}
+
+/* Thin scrollbars for the table containers */
+.scroll-thin::-webkit-scrollbar { height: 8px; width: 8px; }
+.scroll-thin::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 8px; }
+
+/* Modal enter animations */
+@keyframes modalFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes modalPop { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: none; } }
+.modal-backdrop { animation: modalFade 0.15s ease-out; }
+.modal-panel { animation: modalPop 0.18s ease-out; }

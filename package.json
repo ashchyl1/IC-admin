@@ -1,0 +1,46 @@
+{
+  "name": "indiacharts-admin",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "node scripts/with-system-ca.mjs next dev -p 3040",
+    "build": "next build",
+    "start": "node scripts/with-system-ca.mjs next start -p 3040",
+    "lint": "next lint",
+    "seed": "node prisma/seed.mjs",
+    "db:push": "prisma db push",
+    "db:reset": "prisma db push --force-reset && node prisma/seed.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "paper:types": "supabase gen types typescript --project-id $SUPABASE_PROJECT_ID > src/lib/supabase/types.ts",
+    "paper:migrate": "supabase db push",
+    "paper:test": "psql \"$SUPABASE_DB_URL\" -f supabase/tests/engine_tests.sql"
+  },
+  "dependencies": {
+    "@prisma/client": "5.22.0",
+    "@supabase/ssr": "0.5.2",
+    "@supabase/supabase-js": "2.47.10",
+    "clsx": "2.1.1",
+    "date-fns": "3.6.0",
+    "exceljs": "^3.4.0",
+    "lightweight-charts": "5.2.0",
+    "lucide-react": "0.454.0",
+    "marked": "14.1.3",
+    "next": "^14.2.35",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "tailwind-merge": "2.5.4",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "20.16.11",
+    "@types/react": "18.3.11",
+    "@types/react-dom": "18.3.0",
+    "autoprefixer": "10.4.20",
+    "postcss": "8.4.47",
+    "prisma": "5.22.0",
+    "tailwindcss": "3.4.14",
+    "typescript": "5.6.3",
+    "vitest": "2.1.8"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(npx tsc --noEmit)",
+      "PowerShell(npm run build)",
+      "PowerShell(graphify update .)",
+      "Bash(python -c ' *)",
+      "PowerShell(npx tsc --noEmit 2>&1)",
+      "PowerShell(graphify update . 2>&1)",
+      "PowerShell(Get-ChildItem -Force C:\\\\Claude\\\\indiacharts-admin | Select-Object Name, Mode | Format-Table -AutoSize; \"`n--- sizes of big folders ---\"; foreach \\($d in 'node_modules','.next','.git','prisma','public','src'\\) { $p = \"C:\\\\Claude\\\\indiacharts-admin\\\\$d\"; if \\(Test-Path $p\\) { $sz = \\(Get-ChildItem -Recurse -File -Force $p -ErrorAction SilentlyContinue | Measure-Object Length -Sum\\).Sum; \"{0,-16} {1,8:N1} MB\" -f $d, \\($sz/1MB\\) } })"
+    ]
+  }
+}

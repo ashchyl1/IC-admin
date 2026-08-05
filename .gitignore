@@ -1,0 +1,21 @@
+node_modules
+.next
+out
+build
+*.log
+.DS_Store
+
+# env
+.env
+.env.local
+
+# live MCP session token -- credential, never commit
+.kite-mcp-session.json
+
+# database
+prisma/*.db
+prisma/*.db-journal
+
+# uploads
+public/uploads/*
+!public/uploads/.gitkeep

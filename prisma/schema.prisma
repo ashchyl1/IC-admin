@@ -1,0 +1,65 @@
+// IndiaCharts Recommendations Admin — data model
+// Local dev uses SQLite. For prod, change provider to "postgresql" and DATABASE_URL.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Recommendation {
+  id                    String   @id @default(cuid())
+  date                  DateTime?
+  subject               String
+  link                  String?
+  summary               String?
+  chartImage            String?
+  source                String   @default("excel") // manual | website | excel | scrape | api
+  status                String   @default("active") // active | closed | draft
+  recommendationType    String   @default("Enter") // Enter | Update | Exit
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  stocks                RecommendationStock[]
+
+  @@index([date])
+  @@index([status])
+  @@index([source])
+  @@index([recommendationType])
+}
+
+model RecommendationStock {
+  recommendationId  String
+  stockId           String
+  createdAt         DateTime @default(now())
+
+  recommendation    Recommendation @relation(fields: [recommendationId], references: [id], onDelete: Cascade)
+  stock             Stock          @relation(fields: [stockId], references: [stockId], onDelete: Cascade)
+
+  @@id([recommendationId, stockId])
+  @@index([stockId])
+}
+
+model Stock {
+  stockId     String   @id // slug
+  displayName String
+  symbolGuess String?
+  aliases     String?  // comma-separated
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  recommendations RecommendationStock[]
+}
+
+model ImportLog {
+  id         String   @id @default(cuid())
+  timestamp  DateTime @default(now())
+  sources    String   // e.g. "excel:source.xlsx" or "json:feed"
+  rowsMerged Int      @default(0)
+  rowsNew    Int      @default(0)
+  rowsTotal  Int      @default(0)
+  notes      String?
+}
