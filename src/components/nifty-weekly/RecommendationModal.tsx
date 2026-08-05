@@ -7,10 +7,12 @@ import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import {
   BIASES,
+  HORIZONS,
   SETUP_STATUSES,
   TRENDS,
   fridayOf,
   type Bias,
+  type Horizon,
   type Recommendation,
   type SetupStatus,
   type Trend,
@@ -18,43 +20,104 @@ import {
 
 interface Props {
   open: boolean;
+  /** Pass a record to edit it; omit to create a new one. */
+  initial?: Recommendation | null;
   onClose: () => void;
-  onCreated: (rec: Recommendation) => void;
+  onSaved: (rec: Recommendation, mode: "created" | "updated") => void;
 }
 
-/** Level rows are kept as strings so a half-typed "24," doesn't get mangled. */
-type LevelField = "supportLevels" | "resistanceLevels" | "targetLevels" | "invalidationLevels";
+type LevelField = "supportLevels" | "resistanceLevels";
+type RangeField = "target" | "reversal";
 
 const LEVEL_FIELDS: { key: LevelField; label: string; placeholder: string }[] = [
   { key: "supportLevels", label: "Support", placeholder: "24150" },
   { key: "resistanceLevels", label: "Resistance", placeholder: "24720" },
-  { key: "targetLevels", label: "Targets", placeholder: "25150" },
-  { key: "invalidationLevels", label: "Invalidation", placeholder: "23750" },
 ];
 
-function emptyLevels(): Record<LevelField, string[]> {
+/** Target and Reversal are directional from -> to bands, not min/max. */
+const RANGE_FIELDS: { key: RangeField; label: string; hint: string; from: string; to: string }[] = [
+  { key: "target", label: "Target", hint: "where the move is headed", from: "25150", to: "25400" },
+  { key: "reversal", label: "Reversal", hint: "where the call is off", from: "23900", to: "23750" },
+];
+
+/**
+ * Every field is held as a string, so a half-typed "24," survives round-tripping
+ * through state instead of being coerced to NaN and wiped. The route re-parses
+ * everything anyway.
+ */
+interface FormState {
+  weekEnding: string;
+  horizon: Horizon;
+  trend: Trend;
+  bias: Bias;
+  setupStatus: SetupStatus;
+  spotPrice: string;
+  changePoints: string;
+  changePercent: string;
+  supportLevels: string[];
+  resistanceLevels: string[];
+  target: { from: string; to: string };
+  reversal: { from: string; to: string };
+  explanatoryNote: string;
+  recommendationText: string;
+  notes: string;
+}
+
+const numToStr = (n: number | null) => (n === null ? "" : String(n));
+/** A level list must always show at least one input row. */
+const listToStr = (xs: number[]) => (xs.length ? xs.map(String) : [""]);
+
+function blankForm(): FormState {
   return {
+    weekEnding: fridayOf(new Date()),
+    horizon: "Medium Term",
+    trend: "Neutral",
+    bias: "HOLD",
+    setupStatus: "Watching",
+    spotPrice: "",
+    changePoints: "",
+    changePercent: "",
     supportLevels: [""],
     resistanceLevels: [""],
-    targetLevels: [""],
-    invalidationLevels: [""],
+    target: { from: "", to: "" },
+    reversal: { from: "", to: "" },
+    explanatoryNote: "",
+    recommendationText: "",
+    notes: "",
   };
 }
 
-export function AddRecommendationModal({ open, onClose, onCreated }: Props) {
+function formFrom(rec: Recommendation): FormState {
+  return {
+    weekEnding: rec.weekEnding,
+    horizon: rec.horizon,
+    trend: rec.trend,
+    bias: rec.bias,
+    setupStatus: rec.setupStatus,
+    spotPrice: numToStr(rec.spotPrice),
+    changePoints: numToStr(rec.changePoints),
+    changePercent: numToStr(rec.changePercent),
+    supportLevels: listToStr(rec.supportLevels),
+    resistanceLevels: listToStr(rec.resistanceLevels),
+    target: { from: numToStr(rec.target.from), to: numToStr(rec.target.to) },
+    reversal: { from: numToStr(rec.reversal.from), to: numToStr(rec.reversal.to) },
+    explanatoryNote: rec.explanatoryNote,
+    recommendationText: rec.recommendationText,
+    notes: rec.notes,
+  };
+}
+
+/** Only object URLs need releasing; a Supabase https URL must not be touched. */
+function releasePreview(url: string | null) {
+  if (url && url.startsWith("blob:")) URL.revokeObjectURL(url);
+}
+
+export function RecommendationModal({ open, initial, onClose, onSaved }: Props) {
   const { push } = useToast();
+  const editing = initial != null;
 
-  const [weekEnding, setWeekEnding] = React.useState(() => fridayOf(new Date()));
-  const [trend, setTrend] = React.useState<Trend>("Neutral");
-  const [bias, setBias] = React.useState<Bias>("HOLD");
-  const [setupStatus, setSetupStatus] = React.useState<SetupStatus>("Watching");
-  const [spotPrice, setSpotPrice] = React.useState("");
-  const [changePoints, setChangePoints] = React.useState("");
-  const [changePercent, setChangePercent] = React.useState("");
-  const [levels, setLevels] = React.useState(emptyLevels);
-  const [analysis, setAnalysis] = React.useState("");
-
-  const [image, setImage] = React.useState<{ path: string; url: string } | null>(null);
+  const [form, setForm] = React.useState<FormState>(blankForm);
+  const [image, setImage] = React.useState<{ path: string | null; url: string } | null>(null);
   const [preview, setPreview] = React.useState<string | null>(null);
   const [uploading, setUploading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
@@ -62,36 +125,36 @@ export function AddRecommendationModal({ open, onClose, onCreated }: Props) {
 
   const fileRef = React.useRef<HTMLInputElement>(null);
 
-  const reset = React.useCallback(() => {
-    setWeekEnding(fridayOf(new Date()));
-    setTrend("Neutral");
-    setBias("HOLD");
-    setSetupStatus("Watching");
-    setSpotPrice("");
-    setChangePoints("");
-    setChangePercent("");
-    setLevels(emptyLevels());
-    setAnalysis("");
-    setImage(null);
-    setPreview((prev) => {
-      if (prev) URL.revokeObjectURL(prev);
-      return null;
-    });
-  }, []);
-
-  // The object URL backing the preview has to be released or the blob leaks
-  // for the lifetime of the tab.
+  // Reload the form whenever the dialog opens, so editing one card and then
+  // another does not show the first card's values.
   React.useEffect(() => {
-    return () => {
-      if (preview) URL.revokeObjectURL(preview);
-    };
-  }, [preview]);
+    if (!open) return;
+    setForm(initial ? formFrom(initial) : blankForm());
+    setPreview((prev) => {
+      releasePreview(prev);
+      return initial?.chartImageUrl ?? null;
+    });
+    setImage(
+      initial?.chartImageUrl
+        ? { path: initial.chartImagePath, url: initial.chartImageUrl }
+        : null
+    );
+    if (fileRef.current) fileRef.current.value = "";
+    // `initial` is only read at open time on purpose -- re-syncing mid-edit
+    // would discard whatever the user has typed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  React.useEffect(() => () => releasePreview(preview), [preview]);
+
+  const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
+    setForm((f) => ({ ...f, [key]: value }));
 
   const upload = React.useCallback(
     async (file: File) => {
       setUploading(true);
       setPreview((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
+        releasePreview(prev);
         return URL.createObjectURL(file);
       });
       try {
@@ -103,7 +166,7 @@ export function AddRecommendationModal({ open, onClose, onCreated }: Props) {
         setImage({ path: json.path, url: json.url });
       } catch (err) {
         setPreview((prev) => {
-          if (prev) URL.revokeObjectURL(prev);
+          releasePreview(prev);
           return null;
         });
         push(err instanceof Error ? err.message : "Upload failed", "error");
@@ -132,22 +195,35 @@ export function AddRecommendationModal({ open, onClose, onCreated }: Props) {
   }, [open, upload]);
 
   function setLevel(field: LevelField, index: number, value: string) {
-    setLevels((prev) => {
-      const next = [...prev[field]];
+    setForm((f) => {
+      const next = [...f[field]];
       next[index] = value;
-      return { ...prev, [field]: next };
+      return { ...f, [field]: next };
     });
   }
 
   function addLevel(field: LevelField) {
-    setLevels((prev) => ({ ...prev, [field]: [...prev[field], ""] }));
+    setForm((f) => ({ ...f, [field]: [...f[field], ""] }));
   }
 
   function removeLevel(field: LevelField, index: number) {
-    setLevels((prev) => {
-      const next = prev[field].filter((_, i) => i !== index);
-      return { ...prev, [field]: next.length ? next : [""] };
+    setForm((f) => {
+      const next = f[field].filter((_, i) => i !== index);
+      return { ...f, [field]: next.length ? next : [""] };
     });
+  }
+
+  function setRange(field: RangeField, end: "from" | "to", value: string) {
+    setForm((f) => ({ ...f, [field]: { ...f[field], [end]: value } }));
+  }
+
+  function clearImage() {
+    setImage(null);
+    setPreview((prev) => {
+      releasePreview(prev);
+      return null;
+    });
+    if (fileRef.current) fileRef.current.value = "";
   }
 
   async function submit(e: React.FormEvent) {
@@ -155,31 +231,22 @@ export function AddRecommendationModal({ open, onClose, onCreated }: Props) {
     if (saving || uploading) return;
     setSaving(true);
     try {
-      const res = await fetch("/api/nifty-weekly", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          weekEnding,
-          trend,
-          bias,
-          setupStatus,
-          spotPrice,
-          changePoints,
-          changePercent,
-          analysis,
-          supportLevels: levels.supportLevels,
-          resistanceLevels: levels.resistanceLevels,
-          targetLevels: levels.targetLevels,
-          invalidationLevels: levels.invalidationLevels,
-          chartImagePath: image?.path ?? null,
-          chartImageUrl: image?.url ?? null,
-        }),
-      });
+      const res = await fetch(
+        editing ? `/api/nifty-weekly/${initial!.id}` : "/api/nifty-weekly",
+        {
+          method: editing ? "PUT" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...form,
+            chartImagePath: image?.path ?? null,
+            chartImageUrl: image?.url ?? null,
+          }),
+        }
+      );
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Could not save");
-      onCreated(json.recommendation as Recommendation);
-      push("Recommendation added", "success");
-      reset();
+      onSaved(json.recommendation as Recommendation, editing ? "updated" : "created");
+      push(editing ? "Recommendation updated" : "Recommendation added", "success");
       onClose();
     } catch (err) {
       push(err instanceof Error ? err.message : "Could not save", "error");
@@ -189,11 +256,11 @@ export function AddRecommendationModal({ open, onClose, onCreated }: Props) {
   }
 
   return (
-    <Modal open={open} onClose={onClose} labelledBy="add-rec-title" className="kite-theme max-w-2xl">
+    <Modal open={open} onClose={onClose} labelledBy="rec-form-title" className="kite-theme max-w-2xl">
       <form onSubmit={submit}>
-        <div className="border-b px-5 py-4">
-          <h2 id="add-rec-title" className="text-base font-semibold text-foreground">
-            Add weekly recommendation
+        <div className="border-b px-5 py-4 pr-14">
+          <h2 id="rec-form-title" className="text-base font-semibold text-foreground">
+            {editing ? "Edit weekly recommendation" : "Add weekly recommendation"}
           </h2>
           <p className="mt-0.5 text-[13px] text-muted-foreground">
             NIFTY · 1W. Paste a chart screenshot anywhere in this dialog to attach it.
@@ -236,14 +303,7 @@ export function AddRecommendationModal({ open, onClose, onCreated }: Props) {
                   )}
                   <button
                     type="button"
-                    onClick={() => {
-                      setImage(null);
-                      setPreview((prev) => {
-                        if (prev) URL.revokeObjectURL(prev);
-                        return null;
-                      });
-                      if (fileRef.current) fileRef.current.value = "";
-                    }}
+                    onClick={clearImage}
                     aria-label="Remove chart image"
                     className="absolute right-1 top-1 flex h-7 w-7 items-center justify-center rounded-[3px] bg-black/60 text-white transition-colors hover:bg-black/75"
                   >
@@ -289,17 +349,30 @@ export function AddRecommendationModal({ open, onClose, onCreated }: Props) {
                 id="week-ending"
                 type="date"
                 required
-                value={weekEnding}
-                onChange={(e) => setWeekEnding(e.target.value)}
+                value={form.weekEnding}
+                onChange={(e) => set("weekEnding", e.target.value)}
                 className="mt-1.5"
               />
+            </div>
+            <div className="col-span-2 sm:col-span-1">
+              <Label htmlFor="horizon">Recommendation time</Label>
+              <Select
+                id="horizon"
+                value={form.horizon}
+                onChange={(e) => set("horizon", e.target.value as Horizon)}
+                className="mt-1.5 h-9 w-full"
+              >
+                {HORIZONS.map((h) => (
+                  <option key={h}>{h}</option>
+                ))}
+              </Select>
             </div>
             <div>
               <Label htmlFor="trend">Trend</Label>
               <Select
                 id="trend"
-                value={trend}
-                onChange={(e) => setTrend(e.target.value as Trend)}
+                value={form.trend}
+                onChange={(e) => set("trend", e.target.value as Trend)}
                 className="mt-1.5 h-9 w-full"
               >
                 {TRENDS.map((t) => (
@@ -311,8 +384,8 @@ export function AddRecommendationModal({ open, onClose, onCreated }: Props) {
               <Label htmlFor="bias">Bias</Label>
               <Select
                 id="bias"
-                value={bias}
-                onChange={(e) => setBias(e.target.value as Bias)}
+                value={form.bias}
+                onChange={(e) => set("bias", e.target.value as Bias)}
                 className="mt-1.5 h-9 w-full"
               >
                 {BIASES.map((b) => (
@@ -324,8 +397,8 @@ export function AddRecommendationModal({ open, onClose, onCreated }: Props) {
               <Label htmlFor="setup">Setup</Label>
               <Select
                 id="setup"
-                value={setupStatus}
-                onChange={(e) => setSetupStatus(e.target.value as SetupStatus)}
+                value={form.setupStatus}
+                onChange={(e) => set("setupStatus", e.target.value as SetupStatus)}
                 className="mt-1.5 h-9 w-full"
               >
                 {SETUP_STATUSES.map((s) => (
@@ -342,8 +415,8 @@ export function AddRecommendationModal({ open, onClose, onCreated }: Props) {
                 id="spot"
                 inputMode="decimal"
                 placeholder="24380.50"
-                value={spotPrice}
-                onChange={(e) => setSpotPrice(e.target.value)}
+                value={form.spotPrice}
+                onChange={(e) => set("spotPrice", e.target.value)}
                 className="mt-1.5 kite-num"
               />
             </div>
@@ -353,8 +426,8 @@ export function AddRecommendationModal({ open, onClose, onCreated }: Props) {
                 id="chg-pts"
                 inputMode="decimal"
                 placeholder="+142.30"
-                value={changePoints}
-                onChange={(e) => setChangePoints(e.target.value)}
+                value={form.changePoints}
+                onChange={(e) => set("changePoints", e.target.value)}
                 className="mt-1.5 kite-num"
               />
             </div>
@@ -364,8 +437,8 @@ export function AddRecommendationModal({ open, onClose, onCreated }: Props) {
                 id="chg-pct"
                 inputMode="decimal"
                 placeholder="+0.59"
-                value={changePercent}
-                onChange={(e) => setChangePercent(e.target.value)}
+                value={form.changePercent}
+                onChange={(e) => set("changePercent", e.target.value)}
                 className="mt-1.5 kite-num"
               />
             </div>
@@ -377,7 +450,7 @@ export function AddRecommendationModal({ open, onClose, onCreated }: Props) {
               <div key={key}>
                 <Label>{label}</Label>
                 <div className="mt-1.5 space-y-1.5">
-                  {levels[key].map((value, i) => (
+                  {form[key].map((value, i) => (
                     <div key={i} className="flex items-center gap-1.5">
                       <Input
                         inputMode="decimal"
@@ -410,14 +483,76 @@ export function AddRecommendationModal({ open, onClose, onCreated }: Props) {
             ))}
           </div>
 
+          {/* ------------------------------------------- ranges -------- */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {RANGE_FIELDS.map(({ key, label, hint, from, to }) => (
+              <div key={key}>
+                <Label htmlFor={`${key}-from`}>
+                  {label} <span className="font-normal text-muted-foreground">— {hint}</span>
+                </Label>
+                <div className="mt-1.5 flex items-center gap-2">
+                  <Input
+                    id={`${key}-from`}
+                    inputMode="decimal"
+                    placeholder={from}
+                    aria-label={`${label} range from`}
+                    value={form[key].from}
+                    onChange={(e) => setRange(key, "from", e.target.value)}
+                    className="kite-num"
+                  />
+                  <span aria-hidden="true" className="shrink-0 text-muted-foreground">
+                    –
+                  </span>
+                  <Input
+                    inputMode="decimal"
+                    placeholder={to}
+                    aria-label={`${label} range to`}
+                    value={form[key].to}
+                    onChange={(e) => setRange(key, "to", e.target.value)}
+                    className="kite-num"
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* ------------------------------------------- prose --------- */}
           <div>
-            <Label htmlFor="analysis">Analysis</Label>
+            <Label htmlFor="explanatory-note">Explanatory note</Label>
             <Textarea
-              id="analysis"
+              id="explanatory-note"
+              rows={2}
+              maxLength={400}
+              placeholder="One or two lines — the gist of the call."
+              value={form.explanatoryNote}
+              onChange={(e) => set("explanatoryNote", e.target.value)}
+              className="mt-1.5"
+            />
+            <p className="mt-1 text-right text-xs text-muted-foreground">
+              {form.explanatoryNote.length}/400
+            </p>
+          </div>
+
+          <div>
+            <Label htmlFor="recommendation-text">Recommendation</Label>
+            <Textarea
+              id="recommendation-text"
+              rows={3}
+              placeholder="The call itself — e.g. buy dips into 24,150–23,880, target 25,400, exit below 23,750."
+              value={form.recommendationText}
+              onChange={(e) => set("recommendationText", e.target.value)}
+              className="mt-1.5"
+            />
+          </div>
+
+          <div>
+            <Label htmlFor="notes">Notes</Label>
+            <Textarea
+              id="notes"
               rows={5}
-              placeholder="Weekly view, wave count, what would change the call…"
-              value={analysis}
-              onChange={(e) => setAnalysis(e.target.value)}
+              placeholder="Wave count, momentum, levels to watch, anything worth remembering…"
+              value={form.notes}
+              onChange={(e) => set("notes", e.target.value)}
               className="mt-1.5"
             />
           </div>
@@ -429,7 +564,7 @@ export function AddRecommendationModal({ open, onClose, onCreated }: Props) {
           </Button>
           <Button type="submit" disabled={saving || uploading}>
             {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-            {saving ? "Saving…" : "Save recommendation"}
+            {saving ? "Saving…" : editing ? "Save changes" : "Save recommendation"}
           </Button>
         </div>
       </form>

@@ -1,7 +1,15 @@
 "use client";
 import * as React from "react";
 import { cn } from "@/lib/utils";
-import { formatIndex, type Bias, type Recommendation, type Trend } from "@/lib/nifty-weekly/schema";
+import {
+  formatIndex,
+  formatRange,
+  isRangeEmpty,
+  type Bias,
+  type Range,
+  type Recommendation,
+  type Trend,
+} from "@/lib/nifty-weekly/schema";
 
 /** Kite pills: green for the buy side, orange-red for the sell side. */
 const BIAS_STYLES: Record<Bias, string> = {
@@ -12,11 +20,12 @@ const BIAS_STYLES: Record<Bias, string> = {
 };
 
 const TREND_STYLES: Record<Trend, string> = {
-  Bullish: "text-buy",
-  Bearish: "text-sell",
-  Sideways: "text-muted-foreground",
+  Up: "text-buy",
+  Down: "text-sell",
   Neutral: "text-muted-foreground",
 };
+
+const TREND_ARROWS: Record<Trend, string> = { Up: "▲", Down: "▼", Neutral: "—" };
 
 export function BiasPill({ bias, className }: { bias: Bias; className?: string }) {
   return (
@@ -53,13 +62,11 @@ function LevelRow({
 }: {
   label: string;
   levels: number[];
-  tone: "buy" | "sell" | "target" | "invalid";
+  tone: "buy" | "sell";
 }) {
   const chip = {
     buy: "border-buy/25 bg-buy/[0.07] text-buy",
     sell: "border-sell/25 bg-sell/[0.07] text-sell",
-    target: "border-primary/25 bg-primary/[0.07] text-primary",
-    invalid: "border-border bg-muted text-muted-foreground line-through decoration-1",
   }[tone];
 
   return (
@@ -80,6 +87,45 @@ function LevelRow({
               {formatIndex(lvl, 0)}
             </span>
           ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A directional band rendered as one chip, so "25,150 – 25,400" reads as a
+ * single value rather than two levels that happen to sit next to each other.
+ */
+function RangeRow({
+  label,
+  range,
+  tone,
+}: {
+  label: string;
+  range: Range;
+  tone: "target" | "reversal";
+}) {
+  const chip =
+    tone === "target"
+      ? "border-primary/25 bg-primary/[0.07] text-primary"
+      : "border-sell/25 bg-sell/[0.07] text-sell";
+
+  return (
+    <div>
+      <div className="kite-label">{label}</div>
+      <div className="mt-1.5">
+        {isRangeEmpty(range) ? (
+          <span className="text-sm text-muted-foreground">—</span>
+        ) : (
+          <span
+            className={cn(
+              "kite-num inline-block rounded-[3px] border px-1.5 py-0.5 text-[13px] font-medium",
+              chip
+            )}
+          >
+            {formatRange(range)}
+          </span>
         )}
       </div>
     </div>
@@ -116,6 +162,12 @@ export function StructuredPanel({ rec, variant = "card" }: Props) {
           {rec.timeframe}
         </span>
         <BiasPill bias={rec.bias} />
+        <span
+          title="Recommendation time"
+          className="rounded-[3px] bg-muted px-1.5 py-px text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
+        >
+          {rec.horizon}
+        </span>
         <span className="ml-auto text-[13px] text-muted-foreground">
           Week ending{" "}
           <span className="kite-num font-medium text-foreground">{formatWeek(rec.weekEnding)}</span>
@@ -142,10 +194,24 @@ export function StructuredPanel({ rec, variant = "card" }: Props) {
         </div>
       )}
 
+      {/* ------------------------------------------ explanatory note --- */}
+      {/* Sits high on the card: it is the one-line "why" a reader wants
+          before scanning the numbers underneath. */}
+      {rec.explanatoryNote && (
+        <p className="mt-3 border-l-2 border-primary/40 pl-2.5 text-[13px] italic leading-snug text-foreground">
+          {rec.explanatoryNote}
+        </p>
+      )}
+
       {/* ------------------------------------------------ trend/setup -- */}
       <div className="mt-3.5 grid grid-cols-2 gap-x-4 gap-y-3 border-t pt-3.5">
         <Field label="Trend">
-          <span className={cn("font-medium", TREND_STYLES[rec.trend])}>{rec.trend}</span>
+          <span className={cn("font-medium", TREND_STYLES[rec.trend])}>
+            <span aria-hidden="true" className="mr-1 text-[11px]">
+              {TREND_ARROWS[rec.trend]}
+            </span>
+            {rec.trend}
+          </span>
         </Field>
         <Field label="Setup">
           <span className="font-medium text-foreground">{rec.setupStatus}</span>
@@ -156,21 +222,36 @@ export function StructuredPanel({ rec, variant = "card" }: Props) {
       <div className="mt-3.5 grid grid-cols-2 gap-x-4 gap-y-3.5 border-t pt-3.5">
         <LevelRow label="Support" levels={rec.supportLevels} tone="buy" />
         <LevelRow label="Resistance" levels={rec.resistanceLevels} tone="sell" />
-        <LevelRow label="Targets" levels={rec.targetLevels} tone="target" />
-        <LevelRow label="Invalidation" levels={rec.invalidationLevels} tone="invalid" />
+        <RangeRow label="Target" range={rec.target} tone="target" />
+        <RangeRow label="Reversal" range={rec.reversal} tone="reversal" />
       </div>
 
-      {/* ------------------------------------------------ analysis ----- */}
-      {rec.analysis && (
+      {/* --------------------------------------- the call, in prose ---- */}
+      {rec.recommendationText && (
         <div className="mt-3.5 border-t pt-3.5">
-          <div className="kite-label">Analysis</div>
+          <div className="kite-label">Recommendation</div>
+          <p
+            className={cn(
+              "mt-1.5 whitespace-pre-wrap text-[13px] font-medium leading-relaxed text-foreground",
+              !detail && "line-clamp-3"
+            )}
+          >
+            {rec.recommendationText}
+          </p>
+        </div>
+      )}
+
+      {/* ------------------------------------------------ notes -------- */}
+      {rec.notes && (
+        <div className="mt-3.5 border-t pt-3.5">
+          <div className="kite-label">Notes</div>
           <p
             className={cn(
               "mt-1.5 whitespace-pre-wrap text-[13px] leading-relaxed text-foreground",
               !detail && "line-clamp-4"
             )}
           >
-            {rec.analysis}
+            {rec.notes}
           </p>
         </div>
       )}

@@ -4,9 +4,9 @@ import { LineChart, Plus } from "lucide-react";
 import { Button } from "@/components/ui/primitives";
 import { useToast } from "@/components/ui/toast";
 import type { Recommendation } from "@/lib/nifty-weekly/schema";
-import { AddRecommendationModal } from "./AddRecommendationModal";
 import { DetailModal } from "./DetailModal";
 import { RecommendationCard } from "./RecommendationCard";
+import { RecommendationModal } from "./RecommendationModal";
 
 interface Props {
   initial: Recommendation[];
@@ -14,26 +14,65 @@ interface Props {
   loadError?: string | null;
 }
 
+/** Newest week first; id breaks a tie between two calls filed for one week. */
+function byWeekDesc(a: Recommendation, b: Recommendation) {
+  if (a.weekEnding !== b.weekEnding) return a.weekEnding < b.weekEnding ? 1 : -1;
+  return b.id - a.id;
+}
+
 /**
- * The Nifty weekly board: a feed of floating cards, an Add dialog, and a
- * full-view dialog.
+ * The Nifty weekly board: a feed of floating cards, an add/edit dialog, and a
+ * full-view dialog that the mouse wheel steps through week by week.
  *
  * The list is seeded from the server render and then maintained in state, so
- * adding or deleting updates the feed immediately instead of waiting on a
- * refetch.
+ * adding, editing or deleting updates the feed immediately.
  */
 export function NiftyWeeklyBoard({ initial, loadError }: Props) {
   const { push } = useToast();
   const [items, setItems] = React.useState(initial);
-  const [adding, setAdding] = React.useState(false);
-  const [detail, setDetail] = React.useState<Recommendation | null>(null);
-  const [deletingId, setDeletingId] = React.useState<number | null>(null);
 
-  function handleCreated(rec: Recommendation) {
-    // Same ordering the query uses: newest week first, newest id within a week.
+  // Detail is tracked by id, not index: an edit that changes the week
+  // reorders the feed, and an index would silently start pointing at a
+  // different card.
+  const [detailId, setDetailId] = React.useState<number | null>(null);
+  const detailIndex = detailId === null ? -1 : items.findIndex((r) => r.id === detailId);
+
+  const [formOpen, setFormOpen] = React.useState(false);
+  const [editingRec, setEditingRec] = React.useState<Recommendation | null>(null);
+  const [deletingId, setDeletingId] = React.useState<number | null>(null);
+  // Which card to drop back into after the form closes, when the edit was
+  // launched from the full view.
+  const [resumeDetailId, setResumeDetailId] = React.useState<number | null>(null);
+
+  function openAdd() {
+    setEditingRec(null);
+    setFormOpen(true);
+  }
+
+  /**
+   * Editing from the full view has to close it first. Leaving both open stacks
+   * two aria-modal dialogs, which is invalid for assistive tech and makes Esc
+   * and the focus traps fight each other. The full view reopens on close.
+   */
+  function openEdit(rec: Recommendation) {
+    setResumeDetailId(detailId);
+    setDetailId(null);
+    setEditingRec(rec);
+    setFormOpen(true);
+  }
+
+  function closeForm() {
+    setFormOpen(false);
+    if (resumeDetailId !== null) {
+      setDetailId(resumeDetailId);
+      setResumeDetailId(null);
+    }
+  }
+
+  function handleSaved(rec: Recommendation, mode: "created" | "updated") {
     setItems((prev) =>
-      [rec, ...prev].sort((a, b) =>
-        a.weekEnding === b.weekEnding ? b.id - a.id : a.weekEnding < b.weekEnding ? 1 : -1
+      (mode === "created" ? [rec, ...prev] : prev.map((r) => (r.id === rec.id ? rec : r))).sort(
+        byWeekDesc
       )
     );
   }
@@ -50,7 +89,8 @@ export function NiftyWeeklyBoard({ initial, loadError }: Props) {
         throw new Error(json.error || "Could not delete");
       }
       setItems((prev) => prev.filter((r) => r.id !== rec.id));
-      setDetail((d) => (d?.id === rec.id ? null : d));
+      setDetailId((current) => (current === rec.id ? null : current));
+      setResumeDetailId((current) => (current === rec.id ? null : current));
       push("Recommendation deleted", "success");
     } catch (err) {
       push(err instanceof Error ? err.message : "Could not delete", "error");
@@ -74,7 +114,7 @@ export function NiftyWeeklyBoard({ initial, loadError }: Props) {
             {items.length} {items.length === 1 ? "call" : "calls"} · newest first
           </p>
         </div>
-        <Button onClick={() => setAdding(true)} className="ml-auto rounded-[3px]">
+        <Button onClick={openAdd} className="ml-auto rounded-[3px]">
           <Plus className="h-4 w-4" />
           Add
         </Button>
@@ -94,7 +134,7 @@ export function NiftyWeeklyBoard({ initial, loadError }: Props) {
           <p className="mt-1 max-w-sm text-[13px] text-muted-foreground">
             Add the first weekly call — attach the chart screenshot and fill in the levels.
           </p>
-          <Button onClick={() => setAdding(true)} className="mt-4 rounded-[3px]">
+          <Button onClick={openAdd} className="mt-4 rounded-[3px]">
             <Plus className="h-4 w-4" />
             Add recommendation
           </Button>
@@ -106,19 +146,27 @@ export function NiftyWeeklyBoard({ initial, loadError }: Props) {
               key={rec.id}
               rec={rec}
               deleting={deletingId === rec.id}
-              onExpand={() => setDetail(rec)}
+              onExpand={() => setDetailId(rec.id)}
+              onEdit={() => openEdit(rec)}
               onDelete={() => void handleDelete(rec)}
             />
           ))}
         </div>
       )}
 
-      <AddRecommendationModal
-        open={adding}
-        onClose={() => setAdding(false)}
-        onCreated={handleCreated}
+      <RecommendationModal
+        open={formOpen}
+        initial={editingRec}
+        onClose={closeForm}
+        onSaved={handleSaved}
       />
-      <DetailModal rec={detail} onClose={() => setDetail(null)} />
+      <DetailModal
+        items={items}
+        index={detailIndex}
+        onIndexChange={(i) => setDetailId(items[i]?.id ?? null)}
+        onClose={() => setDetailId(null)}
+        onEdit={openEdit}
+      />
     </div>
   );
 }

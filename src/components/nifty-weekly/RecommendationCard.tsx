@@ -1,6 +1,6 @@
 "use client";
 import * as React from "react";
-import { ImageOff, Maximize2, Trash2 } from "lucide-react";
+import { ImageOff, Maximize2, Pencil, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Recommendation } from "@/lib/nifty-weekly/schema";
 import { StructuredPanel } from "./StructuredPanel";
@@ -8,6 +8,7 @@ import { StructuredPanel } from "./StructuredPanel";
 interface Props {
   rec: Recommendation;
   onExpand: () => void;
+  onEdit: () => void;
   onDelete: () => void;
   deleting?: boolean;
 }
@@ -19,7 +20,7 @@ interface Props {
  * whole-card button would have to contain the delete button, which is invalid
  * nesting and makes keyboard order confusing.
  */
-export function RecommendationCard({ rec, onExpand, onDelete, deleting }: Props) {
+export function RecommendationCard({ rec, onExpand, onEdit, onDelete, deleting }: Props) {
   return (
     <article
       className={cn(
@@ -67,6 +68,14 @@ export function RecommendationCard({ rec, onExpand, onDelete, deleting }: Props)
           >
             <Maximize2 className="h-3.5 w-3.5" />
             Full view
+          </button>
+          <button
+            type="button"
+            onClick={onEdit}
+            className="inline-flex items-center gap-1.5 rounded-[3px] px-2 py-1 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            Edit
           </button>
           <button
             type="button"
