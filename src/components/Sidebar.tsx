@@ -10,6 +10,7 @@ import {
   Crosshair,
   CalendarRange,
   CandlestickChart,
+  History,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -18,6 +19,7 @@ const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
   { href: "/recommendations", label: "Recommendations", icon: ListChecks },
   { href: "/nifty-weekly", label: "Nifty Weekly", icon: CalendarRange },
+  { href: "/nifty-timeline", label: "Nifty Timeline", icon: History },
   { href: "/stocks", label: "Stocks", icon: Building2 },
   { href: "/strike-selector", label: "Strike Selector", icon: Crosshair },
   { href: "/import-export", label: "Import / Export", icon: ArrowLeftRight },

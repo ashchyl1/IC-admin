@@ -8,6 +8,7 @@ const NAV = [
   { href: "/", label: "Dashboard", exact: true },
   { href: "/recommendations", label: "Recommendations" },
   { href: "/nifty-weekly", label: "Nifty Weekly" },
+  { href: "/nifty-timeline", label: "Nifty Timeline" },
   { href: "/stocks", label: "Stocks" },
   { href: "/strike-selector", label: "Strike Selector" },
   { href: "/import-export", label: "Import/Export" },

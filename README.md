@@ -30,6 +30,8 @@ Handy scripts: `npm run db:reset` (force-reset schema + reseed).
 - **/recommendations/[id]** & **/new** — editor: stock autocomplete, date, subject (required), validated link, **markdown summary with preview**, **chart image URL + drag-drop upload**, status, source.
 - **/stocks** — master list with counts, inline edit of display name/symbol, and **alias merge** (select 2+, merges into the one with the most recs).
 - **/import-export** — upload `.xlsx` with a **dry-run preview** (new / update / invalid) before commit; multi-sheet export; JSON-feed docs.
+- **/nifty-weekly** — feed of weekly Nifty calls (Supabase-backed): add/edit/delete, chart screenshot, levels, wheel-navigable full view.
+- **/nifty-timeline** — six months of Nifty daily bars wired to the Indiacharts recommendation casebook. **Click any bar** (or focus the chart and use ←/→) and the panel shows the call that was live when that bar printed, in the document's own words: published view, target, reversal, reasoning, and what would have confirmed or invalidated it. Regime bands tint the chart by published trend, and the active call's levels are drawn across the plot. See [Nifty timeline data](#nifty-timeline-data).
 
 ## API
 
@@ -59,6 +61,34 @@ Rows are matched to existing records by **subject + date**; matches update (fill
 ## Multi-sheet export
 
 `Recommendations` (normalized w/ ids) · `Consolidated` (original 6-col schema) · `Stocks` (master + counts) · `Sources` (registry + counts) · `Import_Log` (audit) · `Lookups` (allowed status/source values).
+
+## Nifty timeline data
+
+`/nifty-timeline` reads two committed files — there is nothing to fetch at runtime:
+
+| File | What it is |
+|------|-----------|
+| `src/lib/nifty-timeline/recommendations.ts` | The fifteen dated entries (fourteen Sunday updates + the 12 May mid-week note), parsed out of `Indiacharts_Nifty_Recommendation_Timeline.docx` rather than retyped, so the panel quotes the document verbatim. |
+| `src/lib/nifty-timeline/nifty-daily.json` | The daily bar series, with a `source` field the page prints on screen. |
+
+```bash
+node scripts/build-nifty-daily.mjs             # fetch real ^NSEI bars; falls back offline
+node scripts/build-nifty-daily.mjs --offline    # skip the network
+node scripts/build-nifty-daily.mjs --months 12  # wider window
+```
+
+The committed series is **`"reconstructed"`**, not market data — the machine that
+generated it had no egress to a market-data host. Its swings are the levels the
+casebook actually names (the 22,183 April low, the 24,602 April high the May notes
+keep measuring against, the 23,344 May low, the lower 23,178 June low, the
+23,400–24,600 July range, the late-July retest of the 61.8% at 23,600, and the
+rebound that stalls under the 24,515 confirmation), but intra-week paths are
+synthesised and NSE trading holidays are not modelled. The page labels it as such.
+Re-run the script with network access to overwrite it with real bars; nothing else
+has to change.
+
+Edit `WEEKS` in the script to correct the reconstruction — the daily path follows
+from it, and the generator is seeded, so a re-run is byte-identical.
 
 ## Other modules in this app
 
