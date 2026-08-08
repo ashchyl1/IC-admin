@@ -1,0 +1,23 @@
+# Service layer. Pinned loosely -- these are not the constrained part.
+fastapi==0.118.0
+uvicorn[standard]==0.37.0
+python-multipart==0.0.20
+
+# PDF rasterisation. Also the version Unlimited-OCR itself pins.
+pymupdf==1.27.2.2
+
+# ---------------------------------------------------------------------------
+# Model dependencies, from the Unlimited-OCR README (Python 3.12.3 + CUDA 12.9).
+# Install these only where a GPU is present; the `embedded-text` dev backend
+# runs without them. See README.md in this directory.
+# ---------------------------------------------------------------------------
+# torch==2.10.0
+# torchvision==0.25.0
+# transformers==4.57.1
+# tokenizers==0.22.1
+# Pillow==12.1.1
+# einops==0.8.2
+# addict==2.4.0
+# easydict==1.13
+# matplotlib==3.10.8
+# psutil==7.2.2

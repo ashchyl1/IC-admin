@@ -11,6 +11,7 @@ const NAV = [
   { href: "/stocks", label: "Stocks" },
   { href: "/strike-selector", label: "Strike Selector" },
   { href: "/import-export", label: "Import/Export" },
+  { href: "/pdf-ocr", label: "PDF to Text" },
   { href: "/paper-trading", label: "Paper Trading" },
 ];
 

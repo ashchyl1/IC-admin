@@ -10,6 +10,7 @@ import {
   Crosshair,
   CalendarRange,
   CandlestickChart,
+  ScanText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -21,6 +22,7 @@ const NAV = [
   { href: "/stocks", label: "Stocks", icon: Building2 },
   { href: "/strike-selector", label: "Strike Selector", icon: Crosshair },
   { href: "/import-export", label: "Import / Export", icon: ArrowLeftRight },
+  { href: "/pdf-ocr", label: "PDF to Text", icon: ScanText },
 ];
 
 /**

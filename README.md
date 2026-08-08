@@ -22,6 +22,7 @@ Handy scripts: `npm run db:reset` (force-reset schema + reseed).
 |-----|---------|
 | `DATABASE_URL` | `file:./dev.db` locally. For prod, set a `postgresql://` URL and change `provider` in `prisma/schema.prisma` to `postgresql`. |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | MVP single-admin placeholders. Wire real auth before any shared deployment. |
+| `OCR_SERVICE_URL` | Where the PDF-to-text sidecar listens, default `http://127.0.0.1:8077`. |
 
 ## Pages
 
@@ -30,6 +31,7 @@ Handy scripts: `npm run db:reset` (force-reset schema + reseed).
 - **/recommendations/[id]** & **/new** — editor: stock autocomplete, date, subject (required), validated link, **markdown summary with preview**, **chart image URL + drag-drop upload**, status, source.
 - **/stocks** — master list with counts, inline edit of display name/symbol, and **alias merge** (select 2+, merges into the one with the most recs).
 - **/import-export** — upload `.xlsx` with a **dry-run preview** (new / update / invalid) before commit; multi-sheet export; JSON-feed docs.
+- **/pdf-ocr** — drop a PDF, get plain text back, read with [Unlimited-OCR](https://github.com/baidu/Unlimited-OCR). Works on scans, not just PDFs with a text layer. Needs the sidecar service running — see [ocr-service/README.md](ocr-service/README.md).
 
 ## API
 
@@ -43,6 +45,8 @@ Handy scripts: `npm run db:reset` (force-reset schema + reseed).
 | POST | `/api/import[?dryRun=1]` | `.xlsx` (multipart) **or** JSON `{rows:[…]}` feed |
 | GET | `/api/export` | multi-sheet `.xlsx` (honors `?ids=` or list filters) |
 | POST | `/api/upload` | chart image → `/public/uploads`, returns `{url}` |
+| GET/POST | `/api/pdf-ocr` | OCR service health / submit a PDF (multipart `file`, `mode`, `pages`, `dpi`) → `{id}` |
+| GET/DELETE | `/api/pdf-ocr/[jobId]` | poll a conversion (progress + text) / stop it |
 
 ### JSON feed example
 

@@ -19,3 +19,8 @@ prisma/*.db-journal
 # uploads
 public/uploads/*
 !public/uploads/.gitkeep
+
+# ocr sidecar (python)
+ocr-service/.venv
+ocr-service/__pycache__
+*.pyc
