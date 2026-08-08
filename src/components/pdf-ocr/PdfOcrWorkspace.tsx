@@ -183,7 +183,10 @@ export function PdfOcrWorkspace({ initialStatus }: { initialStatus: OcrServiceSt
           )}
 
           {job && <JobPanel job={job} onStop={stop} onReset={reset} />}
-          {job && isFinished(job) && text && <ResultPanel job={job} text={text} onCopied={() => toast.push("Copied", "success")} />}
+          {/* Always rendered once a job exists, including when the result is
+              empty. A conversion that finds no text still has to say so --
+              silence reads as a broken page. */}
+          {job && <ResultPanel job={job} text={text} onCopied={() => toast.push("Copied", "success")} />}
         </div>
 
         <Card className="h-fit p-5">
@@ -401,6 +404,8 @@ function ResultPanel({ job, text, onCopied }: { job: OcrJob; text: string; onCop
   const [view, setView] = React.useState<"combined" | "pages">("combined");
   const pages = job.pages ?? [];
   const showPages = job.mode === "page" && pages.length > 0;
+  const running = !isFinished(job);
+  const empty = text.length === 0;
 
   async function copy(value: string) {
     try {
@@ -427,7 +432,9 @@ function ResultPanel({ job, text, onCopied }: { job: OcrJob; text: string; onCop
       <div className="flex flex-wrap items-center justify-between gap-2 border-b px-5 py-3">
         <div className="flex items-center gap-3">
           <h2 className="font-semibold">Extracted text</h2>
-          <span className="text-xs text-muted-foreground tabular-nums">{text.length.toLocaleString()} characters</span>
+          <span className="text-xs text-muted-foreground tabular-nums">
+            {text.length.toLocaleString()} characters{running && " so far"}
+          </span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {showPages && (
@@ -446,24 +453,27 @@ function ResultPanel({ job, text, onCopied }: { job: OcrJob; text: string; onCop
               ))}
             </div>
           )}
-          <Button variant="outline" size="sm" onClick={() => copy(text)}>
+          <Button variant="outline" size="sm" onClick={() => copy(text)} disabled={empty}>
             <Copy className="h-3.5 w-3.5" /> Copy
           </Button>
-          <Button variant="outline" size="sm" onClick={() => download("txt")}>
+          <Button variant="outline" size="sm" onClick={() => download("txt")} disabled={empty}>
             <Download className="h-3.5 w-3.5" /> .txt
           </Button>
-          <Button variant="outline" size="sm" onClick={() => download("md")}>
+          <Button variant="outline" size="sm" onClick={() => download("md")} disabled={empty}>
             <Download className="h-3.5 w-3.5" /> .md
           </Button>
         </div>
       </div>
 
-      {view === "combined" || !showPages ? (
-        <pre className="scroll-thin max-h-[32rem] overflow-auto whitespace-pre-wrap break-words px-5 py-4 text-sm leading-relaxed">
+      {empty ? (
+        <EmptyResult job={job} running={running} />
+      ) : view === "combined" || !showPages ? (
+        <pre className="scroll-thin min-h-[16rem] max-h-[32rem] overflow-auto whitespace-pre-wrap break-words px-5 py-4 text-sm leading-relaxed">
           {text}
+          {running && <span className="ml-1 inline-block h-4 w-2 animate-pulse bg-primary align-middle" />}
         </pre>
       ) : (
-        <div className="scroll-thin max-h-[32rem] divide-y overflow-auto">
+        <div className="scroll-thin min-h-[16rem] max-h-[32rem] divide-y overflow-auto">
           {pages.map((page) => (
             <div key={page.number} className="px-5 py-4">
               <div className="mb-2 flex items-center gap-2">
@@ -489,6 +499,51 @@ function ResultPanel({ job, text, onCopied }: { job: OcrJob; text: string; onCop
         </div>
       )}
     </Card>
+  );
+}
+
+/**
+ * What the output box shows when there is no text yet. A blank panel after a
+ * "Converted" toast is the confusing case this exists to prevent -- especially
+ * on a scanned PDF run through the dev backend, which succeeds and legitimately
+ * finds nothing.
+ */
+function EmptyResult({ job, running }: { job: OcrJob; running: boolean }) {
+  const devBackend = job.backend !== "unlimited-ocr";
+
+  let headline: string;
+  let detail: string | null = null;
+  if (running) {
+    headline = "Reading the document…";
+    detail =
+      job.mode === "page"
+        ? "Text appears here as each page finishes."
+        : "Whole-document mode returns everything at once, so this stays empty until the parse completes.";
+  } else if (job.status === "canceled") {
+    headline = "Stopped before any text was read.";
+  } else if (job.status === "error") {
+    headline = "The conversion failed, so there is no text.";
+  } else if (devBackend) {
+    headline = "No text found — and this backend cannot OCR.";
+    detail =
+      "The embedded-text development backend only reads a text layer the PDF already carries. A scanned document has none, so it comes back empty. Run the service without OCR_BACKEND=embedded-text, on a machine with a GPU, to read scans with Unlimited-OCR.";
+  } else {
+    headline = "No text found on the selected pages.";
+    detail = "The pages may be blank, or the scan may be too low-contrast to read. A higher page resolution sometimes helps.";
+  }
+
+  return (
+    <div className="flex min-h-[16rem] flex-col items-center justify-center gap-2 px-8 py-10 text-center">
+      {running ? (
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+      ) : (
+        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
+          <FileText className="h-5 w-5" />
+        </div>
+      )}
+      <p className="text-sm font-medium">{headline}</p>
+      {detail && <p className="max-w-md text-xs text-muted-foreground">{detail}</p>}
+    </div>
   );
 }
 
