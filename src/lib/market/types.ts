@@ -119,7 +119,7 @@ export interface MarketQuote {
   ts: number;
 }
 
-export type ProviderId = "kite-mcp" | "kite-rest" | "bridge" | "synthetic";
+export type ProviderId = "kite-mcp" | "kite-rest" | "bridge" | "synthetic" | "supabase";
 
 /** Everything the UI needs to be honest about where the numbers came from. */
 export interface ProviderInfo {
@@ -149,6 +149,10 @@ export interface CandleResponse {
   instrument: Instrument | null;
   interval: Interval;
   candles: MarketCandle[];
+  /** Where the bars came from — see the candles route for the precedence. */
+  source?: "cache" | "broker" | "broker+cache" | "cache-fallback";
+  /** Bars written back to Supabase on this request. */
+  stored?: number;
   /** Present when a provider failed and a fallback answered instead. */
   warning?: string;
 }

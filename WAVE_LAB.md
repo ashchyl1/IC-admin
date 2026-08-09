@@ -401,6 +401,102 @@ names and schemas, Kite's response shapes, and the signed-out refusal. Point
 
 ---
 
+## Kite Connect sign-in and the Supabase store
+
+Two things that make the live data path actually usable day to day: a real
+Zerodha login, and somewhere for the bars to live.
+
+### Signing in with Kite Connect
+
+`kite-mcp` is one route in; this is the other, and it is the one that works with
+a plain Kite Connect app. Set the key **and secret**:
+
+```bash
+MARKET_PROVIDER=kite-rest
+KITE_API_KEY=your_api_key
+KITE_API_SECRET=your_api_secret
+KITE_REDIRECT_URL=http://localhost:3040/api/kite/callback
+```
+
+`KITE_REDIRECT_URL` has to match the redirect URL registered on your Kite
+developer console character for character — Zerodha ignores any redirect passed
+at login time, so a mismatch shows up as a login that lands somewhere odd rather
+than as an error.
+
+Then open the connection badge and choose **Sign in with Kite Connect**. The app
+sends you to Zerodha, Zerodha returns a one-time `request_token`, and the app
+exchanges it for an access token by proving it holds the secret
+(`sha256(api_key + request_token + api_secret)`). Zerodha invalidates tokens at
+the next pre-open, about 06:00 IST, so this is a once-a-day step; the panel shows
+when the current one dies.
+
+| Route | Purpose |
+|---|---|
+| `GET /api/kite/login` | Start the sign-in (redirects to Zerodha) |
+| `GET /api/kite/callback` | Zerodha returns here; swaps the token and stores it |
+| `GET /api/kite/session` | Is there a live token, whose is it, when does it die |
+| `DELETE /api/kite/session` | Forget it |
+
+**Where the token lives.** It is a credential — it can place orders — so it never
+reaches the browser and `/api/kite/session` never returns it. In order of
+preference it comes from `KITE_ACCESS_TOKEN` (an explicit override), the process
+cache, Supabase, then a local `.kite-session.json` written `0600` and
+git-ignored. That file is not belt-and-braces: module state does not survive
+between requests under Next's per-route compilation, so an in-memory-only token
+makes the login appear to succeed and then vanish on the very next request.
+
+### Storing candles in Supabase
+
+Set `SUPABASE_BRIDGE_KEY` alongside the existing `NEXT_PUBLIC_SUPABASE_*` vars
+and the chart starts caching what it fetches.
+
+It reuses the paper-trading module's `instruments` and `market_candles` tables
+and its established write path: the bridge-key-gated `import_market_candles`
+RPC from migration 0007, which exists precisely so a console can move candles
+without being handed the service-role key. Migration 0012 adds the symmetric
+`read_market_candles`, plus `bridge.kite_sessions` for the access token.
+
+Apply them with `npm run paper:migrate`, then create the bridge key once:
+
+```sql
+insert into bridge.api_keys (name, key_hash)
+values ('kite-console', extensions.crypt('<your key>', extensions.gen_salt('bf')))
+on conflict (name) do update set key_hash = excluded.key_hash;
+```
+
+`/api/market/candles` then resolves in this order:
+
+1. **Cache**, when the stored series is current for its interval — one interval
+   of slack intraday, a long weekend for daily and above. Kite's historical
+   endpoint is rate-limited and every pan would otherwise spend a request.
+2. **Broker**, for anything missing, written straight back so the next request
+   is cheap.
+3. **Stale cache**, if the broker is unreachable — an expired token, an outage.
+   The response says plainly that the bars are stored and why they may be
+   behind, which beats a blank chart.
+
+Only live prices are ever written. The synthetic fallback is never persisted,
+and `/api/market/sync` refuses outright rather than poisoning shared reference
+data with invented bars.
+
+**Back-filling.** The connection panel's *Back-fill* button pulls ten years for
+the focused chart in one go, so a Primary-degree count is not waiting on a
+rate-limited broker. The same thing over HTTP:
+
+```bash
+curl -X POST http://localhost:3040/api/market/sync \
+  -H 'Content-Type: application/json' \
+  -d '{"symbol":"NSE:NIFTY 50","interval":"day","days":3650}'
+```
+
+**Testing without a broker.** `node scripts/mock-kite-rest.mjs 4222` stands in
+for Kite Connect: it verifies the login checksum the way Zerodha does (a wrong
+secret gets ``Invalid `checksum` ``), serves historical candles with `+0530`
+timestamps, quotes and the instrument CSV. Point `KITE_API_URL` at it to
+exercise the whole sign-in without an account.
+
+---
+
 ### Deploying to Vercel
 
 The repository needs no Vercel-specific config — Next.js is detected, and

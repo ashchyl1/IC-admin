@@ -12,6 +12,7 @@ import "server-only";
  */
 
 import { fetchWithTimeout, readJson, truncate } from "../http";
+import { currentKiteSession, forgetCachedKiteSession } from "../kite-session";
 import { dedupe, parseInstrumentCsv, toCandles, toQuotes } from "../normalize";
 import { fromChartTime } from "@/lib/scalper/time";
 import {
@@ -19,9 +20,11 @@ import {
   ProviderError,
   type CandleRequest,
   type Instrument,
+  type LoginChallenge,
   type MarketCandle,
   type MarketProvider,
   type MarketQuote,
+  type ProviderDiagnostics,
   type ProviderInfo,
 } from "../types";
 
@@ -33,7 +36,12 @@ const instrumentCache = new Map<string, { at: number; rows: Instrument[] }>();
 
 export interface KiteRestOptions {
   apiKey: string;
-  accessToken: string;
+  /**
+   * Resolved per request rather than fixed at construction: the token comes
+   * from the Kite Connect login and is replaced every morning, so a provider
+   * built once at boot would hold a dead one all day.
+   */
+  accessToken: () => Promise<string | null>;
   baseUrl?: string;
 }
 
@@ -46,27 +54,83 @@ export class KiteRestProvider implements MarketProvider {
     this.info = { id: PROVIDER, label: "Kite Connect REST", live: true, detail: this.baseUrl };
   }
 
-  private headers(): Record<string, string> {
+  private async headers(): Promise<Record<string, string>> {
+    const accessToken = await this.options.accessToken();
+    if (!accessToken) {
+      throw new ProviderError(
+        "No Kite access token. Sign in with Kite Connect from the chart's connection panel, " +
+          "or set KITE_ACCESS_TOKEN.",
+        PROVIDER,
+        401
+      );
+    }
     return {
       "X-Kite-Version": "3",
-      Authorization: `token ${this.options.apiKey}:${this.options.accessToken}`,
+      Authorization: `token ${this.options.apiKey}:${accessToken}`,
     };
   }
 
   private async get(path: string): Promise<unknown> {
     const response = await fetchWithTimeout(
       `${this.baseUrl}${path}`,
-      { method: "GET", headers: this.headers() },
+      { method: "GET", headers: await this.headers() },
       PROVIDER
     );
     if (response.status === 403 || response.status === 401) {
+      // The token is dead, so drop the cached copy — the next request will
+      // re-read it and report "sign in again" rather than replaying this.
+      forgetCachedKiteSession();
       throw new ProviderError(
-        "Kite rejected the access token (403). Kite access tokens expire daily — re-run the login flow and update KITE_ACCESS_TOKEN.",
+        "Kite rejected the access token. Tokens expire at the next pre-open (about 06:00 IST) — sign in with Kite Connect again.",
         PROVIDER,
         401
       );
     }
     return readJson(response, PROVIDER);
+  }
+
+  async diagnostics(): Promise<ProviderDiagnostics> {
+    const session = await currentKiteSession();
+    if (!session) {
+      return {
+        provider: this.info,
+        ready: false,
+        needsLogin: true,
+        detail: "No Kite access token yet — sign in with Kite Connect.",
+      };
+    }
+    if (session.expired) {
+      return {
+        provider: this.info,
+        ready: false,
+        needsLogin: true,
+        detail: `The Kite token expired at ${session.expiresAt}. Sign in again.`,
+      };
+    }
+    try {
+      await this.quotes(["NSE:NIFTY 50"]);
+      return {
+        provider: this.info,
+        ready: true,
+        needsLogin: false,
+        detail: `Signed in as ${session.userName ?? session.userId ?? "your Kite account"} (token from ${session.source}).`,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        provider: this.info,
+        ready: false,
+        needsLogin: error instanceof ProviderError && error.status === 401,
+        detail: message,
+      };
+    }
+  }
+
+  async login(): Promise<LoginChallenge> {
+    return {
+      url: "/api/kite/login",
+      message: "Sign in to Zerodha, then come back — the token is stored for the rest of the day.",
+    };
   }
 
   async candles(request: CandleRequest): Promise<{
@@ -135,7 +199,7 @@ export class KiteRestProvider implements MarketProvider {
 
     const response = await fetchWithTimeout(
       `${this.baseUrl}/instruments${exchange ? `/${exchange}` : ""}`,
-      { method: "GET", headers: this.headers(), timeoutMs: 60_000 },
+      { method: "GET", headers: await this.headers(), timeoutMs: 60_000 },
       PROVIDER
     );
     const csv = await response.text();

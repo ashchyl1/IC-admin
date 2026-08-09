@@ -12,6 +12,9 @@ build
 # live MCP session token -- credential, never commit
 .kite-mcp-session.json
 
+# Kite Connect access token -- credential, never commit
+.kite-session.json
+
 # database
 prisma/*.db
 prisma/*.db-journal

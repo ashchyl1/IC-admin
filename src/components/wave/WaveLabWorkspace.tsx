@@ -195,7 +195,13 @@ export function WaveLabWorkspace() {
               Simulated data
             </Badge>
           ) : null}
-          <ConnectZerodha onNotify={store.notify} onReload={() => void store.loadAll()} />
+          <ConnectZerodha
+            onNotify={store.notify}
+            onReload={() => void store.loadAll()}
+            syncTarget={
+              focused ? { symbol: focused.symbol, title: focused.title, interval: focused.interval } : null
+            }
+          />
           {openTrades > 0 ? (
             <Badge tone="cyan" title="Simulated positions currently open">
               {openTrades} paper {openTrades === 1 ? "position" : "positions"}

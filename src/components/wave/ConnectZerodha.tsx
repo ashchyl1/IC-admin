@@ -14,27 +14,31 @@
  */
 
 import * as React from "react";
-import { Check, Copy, ExternalLink, KeyRound, Loader2, PlugZap, RefreshCw, TriangleAlert } from "lucide-react";
+import { Check, Copy, Database, ExternalLink, KeyRound, Loader2, PlugZap, RefreshCw, TriangleAlert } from "lucide-react";
 
 import { getMarketClient, type MarketStatus } from "@/lib/market/client";
+import type { Interval } from "@/lib/market/types";
 import { Badge, Button, clsx } from "@/components/scalper/ui";
 
 interface Props {
   onNotify: (tone: "info" | "error" | "success", message: string) => void;
   onReload: () => void;
+  /** What a "Sync to Supabase" click should back-fill. */
+  syncTarget: { symbol: string; title: string; interval: Interval } | null;
 }
 
 /** What to paste into `.env`, for the endpoint most people will use. */
 const ENV_SNIPPET = `MARKET_PROVIDER=kite-mcp
 KITE_MCP_URL=https://mcp.kite.trade/mcp`;
 
-export function ConnectZerodha({ onNotify, onReload }: Props) {
+export function ConnectZerodha({ onNotify, onReload, syncTarget }: Props) {
   const [status, setStatus] = React.useState<MarketStatus | null>(null);
   const [statusError, setStatusError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [open, setOpen] = React.useState(false);
   const [loginUrl, setLoginUrl] = React.useState<string | null>(null);
   const [copied, setCopied] = React.useState(false);
+  const [syncing, setSyncing] = React.useState(false);
   const boxRef = React.useRef<HTMLDivElement>(null);
 
   const refresh = React.useCallback(async () => {
@@ -54,6 +58,38 @@ export function ConnectZerodha({ onNotify, onReload }: Props) {
     void refresh();
   }, [refresh]);
 
+  // Zerodha returns the user to this page after the consent screen, so the
+  // outcome arrives in the URL rather than in any client state we kept.
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const outcome = params.get("kite");
+    if (!outcome) return;
+
+    if (outcome === "connected") {
+      const user = params.get("user");
+      const expires = params.get("expires");
+      onNotify(
+        "success",
+        `Connected to Zerodha${user ? ` as ${user}` : ""}.` +
+          (expires ? ` The token is valid until ${new Date(expires).toLocaleString("en-IN")}.` : "") +
+          (params.get("volatile") ? " Not stored — configure Supabase to keep it across restarts." : "")
+      );
+      void refresh();
+      onReload();
+    } else if (outcome === "cancelled") {
+      onNotify("info", "The Zerodha sign-in was cancelled.");
+    } else {
+      onNotify("error", params.get("message") ?? "The Zerodha sign-in failed.");
+    }
+
+    // Clear the params so a refresh does not replay the notice.
+    const clean = new URL(window.location.href);
+    for (const key of ["kite", "user", "expires", "message", "volatile"]) clean.searchParams.delete(key);
+    window.history.replaceState({}, "", clean.toString());
+    // Runs once per navigation; refresh and onReload are stable enough here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   React.useEffect(() => {
     if (!open) return;
     const onDown = (event: MouseEvent) => {
@@ -69,6 +105,8 @@ export function ConnectZerodha({ onNotify, onReload }: Props) {
   const connected = status?.diagnostics?.ready ?? status?.active?.live ?? false;
   const needsLogin = status?.diagnostics?.needsLogin ?? false;
   const configured = (status?.chain ?? []).some((entry) => entry.id !== "synthetic");
+  const kite = status?.kite;
+  const store = status?.store;
 
   const label = statusError
     ? "Data status"
@@ -98,6 +136,34 @@ export function ConnectZerodha({ onNotify, onReload }: Props) {
       onNotify("error", error instanceof Error ? error.message : "Login failed");
     } finally {
       setBusy(false);
+    }
+  };
+
+  /**
+   * Kite Connect's consent screen redirects back here, so it has to own the
+   * tab. The MCP path hands back an absolute URL to Zerodha and is fine in a
+   * new one — hence the split on whether the URL is ours.
+   */
+  const signInWithKite = () => {
+    window.location.href = "/api/kite/login";
+  };
+
+  const syncToStore = async () => {
+    const client = getMarketClient();
+    if (!client.sync || !syncTarget) return;
+    setSyncing(true);
+    try {
+      const result = await client.sync(syncTarget.symbol, syncTarget.interval, 3_650);
+      onNotify(
+        "success",
+        `Stored ${result.written} ${syncTarget.title} ${result.interval} bars in Supabase ` +
+          `(${result.inserted} new, ${result.updated} updated; ${result.totalAfter} held).`
+      );
+      void refresh();
+    } catch (error) {
+      onNotify("error", error instanceof Error ? error.message : "Sync failed");
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -219,6 +285,79 @@ export function ConnectZerodha({ onNotify, onReload }: Props) {
               ) : null}
             </>
           )}
+
+          {/* ------------------------------------------- kite connect login --- */}
+          {kite?.configured ? (
+            <div className="mt-2 rounded border border-slate-800 bg-slate-900/50 p-2">
+              <div className="mb-1 flex items-center gap-1.5">
+                <KeyRound className="h-3 w-3 text-slate-500" />
+                <span className="font-bold uppercase tracking-wider text-slate-400">Kite Connect</span>
+                <Badge tone={kite.signedIn ? "green" : "amber"}>
+                  {kite.signedIn ? "signed in" : kite.expired ? "expired" : "signed out"}
+                </Badge>
+              </div>
+              <p className="leading-relaxed text-slate-400">
+                {kite.signedIn
+                  ? `${kite.userName ?? "Your account"} — token valid until ${
+                      kite.expiresAt ? new Date(kite.expiresAt).toLocaleString("en-IN") : "the next pre-open"
+                    }${kite.tokenSource === "env" ? ", from KITE_ACCESS_TOKEN" : ""}.`
+                  : "Sign in to Zerodha to fetch historic and live data. Tokens last until the next pre-open, so this is a once-a-day step."}
+              </p>
+              <Button tone={kite.signedIn ? "neutral" : "accent"} onClick={signInWithKite} className="mt-1.5">
+                <KeyRound className="h-3 w-3" />
+                {kite.signedIn ? "Sign in again" : "Sign in with Kite Connect"}
+              </Button>
+              <p className="mt-1 leading-relaxed text-slate-600">
+                Redirect URL on your Kite app must be exactly{" "}
+                <code className="break-all rounded bg-slate-800 px-1 text-[10px] text-slate-400">
+                  {kite.redirectUrl}
+                </code>
+              </p>
+            </div>
+          ) : null}
+
+          {/* ----------------------------------------------- supabase store --- */}
+          <div className="mt-2 rounded border border-slate-800 bg-slate-900/50 p-2">
+            <div className="mb-1 flex items-center gap-1.5">
+              <Database className="h-3 w-3 text-slate-500" />
+              <span className="font-bold uppercase tracking-wider text-slate-400">Supabase store</span>
+              <Badge tone={store?.configured ? "green" : "slate"}>
+                {store?.configured ? "on" : "off"}
+              </Badge>
+            </div>
+            {store?.configured ? (
+              <>
+                <p className="leading-relaxed text-slate-400">
+                  Bars are cached as you browse and served from here when they are current, which
+                  keeps the chart off Zerodha&apos;s rate limits — and keeps it working when the
+                  token expires.
+                </p>
+                <Button
+                  disabled={syncing || !syncTarget || !connected}
+                  onClick={syncToStore}
+                  className="mt-1.5"
+                  title={
+                    connected
+                      ? "Fetch ten years for this chart and store it"
+                      : "Connect Zerodha first — simulated prices are never stored"
+                  }
+                >
+                  {syncing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Database className="h-3 w-3" />}
+                  {syncing
+                    ? "Storing…"
+                    : syncTarget
+                      ? `Back-fill ${syncTarget.title} ${syncTarget.interval}`
+                      : "Back-fill this chart"}
+                </Button>
+              </>
+            ) : (
+              <p className="leading-relaxed text-slate-500">
+                Off. Set <code className="rounded bg-slate-800 px-1 text-[10px] text-slate-300">SUPABASE_BRIDGE_KEY</code>{" "}
+                alongside the existing Supabase vars to cache candles and keep the Kite token across
+                restarts.
+              </p>
+            )}
+          </div>
 
           {loginUrl ? (
             <a

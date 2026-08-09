@@ -9,6 +9,7 @@ import "server-only";
  * screen — but it is flagged `live: false`, and the UI says so loudly.
  */
 
+import { currentKiteSession } from "./kite-session";
 import { BridgeProvider } from "./providers/bridge";
 import { KiteMcpProvider } from "./providers/kite-mcp";
 import { KiteRestProvider } from "./providers/kite-rest";
@@ -73,10 +74,17 @@ function build(id: ProviderId): MarketProvider | null {
       return url ? new BridgeProvider({ baseUrl: url }) : null;
     }
     case "kite-rest": {
+      // Only the API key is needed to build the provider now: the access token
+      // arrives from the Kite Connect login and is resolved per request, so
+      // this path is available before anyone has signed in — which is what
+      // lets the UI offer the sign-in at all.
       const apiKey = env("KITE_API_KEY");
-      const accessToken = env("KITE_ACCESS_TOKEN");
-      return apiKey && accessToken
-        ? new KiteRestProvider({ apiKey, accessToken, baseUrl: env("KITE_API_URL") })
+      return apiKey
+        ? new KiteRestProvider({
+            apiKey,
+            accessToken: async () => (await currentKiteSession())?.accessToken ?? null,
+            baseUrl: env("KITE_API_URL"),
+          })
         : null;
     }
     case "synthetic":

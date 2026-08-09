@@ -34,12 +34,34 @@ export interface QuoteResult {
   last: number;
 }
 
+export interface KiteStatus {
+  configured: boolean;
+  redirectUrl: string;
+  signedIn: boolean;
+  userName: string | null;
+  expiresAt: string | null;
+  expired: boolean | null;
+  tokenSource: string | null;
+}
+
 export interface MarketStatus {
   mode: string;
   chain: ProviderInfo[];
   active: ProviderInfo | null;
   canLogin: boolean;
   diagnostics: ProviderDiagnostics | null;
+  kite?: KiteStatus;
+  store?: { configured: boolean; label: string };
+}
+
+export interface SyncResult {
+  symbol: string;
+  interval: string;
+  fetched: number;
+  written: number;
+  inserted: number;
+  updated: number;
+  totalAfter: number;
 }
 
 export interface MarketClient {
@@ -49,6 +71,8 @@ export interface MarketClient {
   /** Omitted by clients with no server behind them, e.g. the standalone build. */
   status?(): Promise<MarketStatus>;
   login?(): Promise<LoginChallenge & { provider: ProviderInfo }>;
+  /** Backfill a range from the broker into the Supabase store. */
+  sync?(symbol: string, interval: Interval, days: number): Promise<SyncResult>;
 }
 
 /** Talks to this app's own route handlers. */
@@ -90,6 +114,17 @@ export const httpMarketClient: MarketClient = {
   async status() {
     const response = await fetch("/api/market/status");
     const payload = (await response.json()) as MarketStatus & { error?: string };
+    if (!response.ok) throw new Error(payload.error ?? `HTTP ${response.status}`);
+    return payload;
+  },
+
+  async sync(symbol, interval, days) {
+    const response = await fetch("/api/market/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ symbol, interval, days }),
+    });
+    const payload = (await response.json()) as SyncResult & { error?: string };
     if (!response.ok) throw new Error(payload.error ?? `HTTP ${response.status}`);
     return payload;
   },

@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 
 import { configuredMode, providerChain } from "@/lib/market";
+import { canRunKiteLogin, currentKiteSession, kiteRedirectUrl } from "@/lib/market/kite-session";
 import { errorResponse } from "@/lib/market/responses";
+import { isStoreConfigured } from "@/lib/market/supabase-store";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -41,6 +43,7 @@ export async function GET(request: Request) {
     // health actually decides whether the charts show real prices.
     const target = chain.find((entry) => typeof entry.diagnostics === "function");
     const diagnostics = target?.diagnostics ? await target.diagnostics() : null;
+    const kiteSession = await currentKiteSession().catch(() => null);
 
     return NextResponse.json({
       mode: configuredMode(),
@@ -48,6 +51,24 @@ export async function GET(request: Request) {
       active: chain[0]?.info ?? null,
       canLogin: chain.some((entry) => typeof entry.login === "function"),
       diagnostics,
+      // The Kite Connect login is reported separately from the provider
+      // diagnostics: it is a property of the account, not of whichever
+      // provider happens to be first in the chain.
+      kite: {
+        configured: canRunKiteLogin(),
+        redirectUrl: kiteRedirectUrl(request),
+        // Never the token itself — this endpoint is readable by anyone who can
+        // reach the app, and the token can place orders.
+        signedIn: Boolean(kiteSession && !kiteSession.expired),
+        userName: kiteSession?.userName ?? null,
+        expiresAt: kiteSession?.expiresAt ?? null,
+        expired: kiteSession?.expired ?? null,
+        tokenSource: kiteSession?.source ?? null,
+      },
+      store: {
+        configured: isStoreConfigured(),
+        label: "Supabase",
+      },
     });
   } catch (error) {
     return errorResponse(error);
