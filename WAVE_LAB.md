@@ -281,6 +281,36 @@ type check.
 
 ---
 
+## Deploying it
+
+The Wave Lab itself is host-agnostic: the page is client-rendered and its only
+server dependency is `/api/market/*`, which is stateless. It runs on Vercel,
+Netlify, Cloud Run or any Node host with no changes.
+
+Two caveats about deploying **the wider app**, neither specific to this module:
+
+- **The recommendations admin uses Prisma against SQLite** (`DATABASE_URL=file:./dev.db`).
+  Serverless filesystems are read-only and ephemeral, so those pages need a
+  hosted Postgres and a `provider` change in `prisma/schema.prisma` before the
+  app as a whole works on Vercel. `/wave-lab` does not touch Prisma and is
+  unaffected.
+- **Saving analyses into the repository is a local-development affordance.** On a
+  read-only host `POST /api/wave/analysis` returns 501 with an explanation and
+  `GET` returns an empty list; Copy JSON and the `.json` download carry the
+  identical document and work everywhere.
+
+### Before putting it on a public URL
+
+This app has no authentication — `ADMIN_EMAIL`/`ADMIN_PASSWORD` are placeholders
+and nothing enforces them. A public deployment with `KITE_ACCESS_TOKEN` or
+`KITE_MCP_URL` set turns `/api/market/*` into an open proxy onto your broker
+session: anyone with the URL can pull instrument data against your Zerodha
+account, and rate limits are charged to you. Put it behind access control
+(Vercel password protection, Cloudflare Access, or real auth) before sharing the
+link, or deploy without broker credentials and let it serve simulated data.
+
+---
+
 ## Tests
 
 `npx vitest run tests/wave-rules.test.ts` — 51 cases over the rule engine

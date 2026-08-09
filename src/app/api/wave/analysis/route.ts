@@ -49,8 +49,17 @@ export async function GET(request: Request) {
     entries.sort((a, b) => b.savedAt.localeCompare(a.savedAt));
     return NextResponse.json({ analyses: entries, directory: "data/wave-analyses" });
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return NextResponse.json({ error: "Analysis not found" }, { status: 404 });
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      return NextResponse.json(
+        id ? { error: "Analysis not found" } : { analyses: [], directory: "data/wave-analyses" },
+        { status: id ? 404 : 200 }
+      );
+    }
+    // A read-only deployment has no saved-analysis directory and never will;
+    // an empty list is the truthful answer, not a server error.
+    if (code === "EROFS" || code === "EACCES" || code === "EPERM") {
+      return NextResponse.json({ analyses: [], readOnly: true, directory: null });
     }
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Read failed" },
@@ -105,6 +114,22 @@ export async function POST(request: Request) {
       warnings: parsed.warnings,
     });
   } catch (error) {
+    // Serverless hosts (Vercel, Netlify, Cloud Run) mount the bundle read-only,
+    // so saving into the repository is a local-development affordance only.
+    // Say so plainly instead of surfacing a raw EROFS — the download and
+    // clipboard routes out of the export dialog work everywhere.
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "EROFS" || code === "EACCES" || code === "EPERM") {
+      return NextResponse.json(
+        {
+          error:
+            "This deployment has a read-only filesystem, so analyses cannot be saved into the repository. " +
+            "Use Copy JSON or the .json download instead — both carry the identical document.",
+          readOnly: true,
+        },
+        { status: 501 }
+      );
+    }
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Write failed" },
       { status: 500 }
