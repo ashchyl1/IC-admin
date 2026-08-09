@@ -3,15 +3,17 @@
 /**
  * Instrument picker.
  *
- * Queries `/api/market/search`, which resolves through whichever Zerodha path
- * is configured — so the list here is the broker's real instrument master, not
- * a hard-coded set. Debounced, because the Kite instrument dump is large and
- * every keystroke would otherwise re-rank a hundred thousand rows.
+ * Goes through the market client, which normally resolves to
+ * `/api/market/search` and whichever Zerodha path is configured — so the list
+ * here is the broker's real instrument master, not a hard-coded set. Debounced,
+ * because the Kite instrument dump is large and every keystroke would otherwise
+ * re-rank a hundred thousand rows.
  */
 
 import * as React from "react";
 import { Search } from "lucide-react";
 
+import { getMarketClient } from "@/lib/market/client";
 import type { Instrument } from "@/lib/market/types";
 import { clsx } from "@/components/scalper/ui";
 
@@ -34,28 +36,22 @@ export function SymbolSearch({ value, title, onPick }: Props) {
       setResults([]);
       return;
     }
-    const controller = new AbortController();
+    let cancelled = false;
     const timer = setTimeout(async () => {
       setLoading(true);
       setError(null);
       try {
-        const response = await fetch(`/api/market/search?q=${encodeURIComponent(query)}&limit=25`, {
-          signal: controller.signal,
-        });
-        const payload = (await response.json()) as { instruments?: Instrument[]; error?: string };
-        if (!response.ok) throw new Error(payload.error ?? `HTTP ${response.status}`);
-        setResults(payload.instruments ?? []);
+        const instruments = await getMarketClient().search(query, 25);
+        if (!cancelled) setResults(instruments);
       } catch (caught) {
-        if ((caught as Error).name !== "AbortError") {
-          setError(caught instanceof Error ? caught.message : "Search failed");
-        }
+        if (!cancelled) setError(caught instanceof Error ? caught.message : "Search failed");
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }, 220);
 
     return () => {
-      controller.abort();
+      cancelled = true;
       clearTimeout(timer);
     };
   }, [query, open]);

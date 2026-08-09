@@ -23,3 +23,6 @@ public/uploads/*
 # saved wave analyses -- working files, not source
 data/wave-analyses/*
 !data/wave-analyses/.gitkeep
+
+# standalone build output -- rebuild with scripts/build-artifact.mjs
+artifact/wave-lab.html

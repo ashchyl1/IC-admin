@@ -15,7 +15,8 @@
 
 import { create } from "zustand";
 
-import type { Interval, MarketCandle, ProviderInfo } from "@/lib/market/types";
+import { getMarketClient } from "@/lib/market/client";
+import type { Interval, MarketCandle } from "@/lib/market/types";
 import { INTERVALS } from "@/lib/market/types";
 import { DEFAULT_DEGREE, type DegreeKey } from "./degrees";
 import { TOOLS, defaultVariant, type ToolId } from "./patterns";
@@ -157,11 +158,17 @@ export const useWaveStore = create<WaveStore>((set, get) => ({
   hydrate: () => {
     if (get().hydrated) return;
     const restored = readStorage();
+    // Two terminals side by side need width. On a phone — and this workspace
+    // does get opened on one — stack them and fold the inspector away, unless
+    // the analyst has already chosen otherwise.
+    const narrow = typeof window !== "undefined" && window.innerWidth < 900;
+
     set((state) => ({
       hydrated: true,
       terminals: restored?.terminals ?? state.terminals,
-      layout: restored?.layout ?? state.layout,
+      layout: restored?.layout ?? (narrow ? "rows" : state.layout),
       syncCharts: restored?.syncCharts ?? state.syncCharts,
+      inspectorOpen: narrow ? false : state.inspectorOpen,
     }));
     void get().loadAll();
   },
@@ -174,30 +181,21 @@ export const useWaveStore = create<WaveStore>((set, get) => ({
       data: { ...state.data, [id]: { ...(state.data[id] ?? EMPTY_DATA), loading: true, error: null } },
     }));
 
-    const params = new URLSearchParams({
-      symbol: terminal.symbol,
-      interval: terminal.interval,
-      days: String(INTERVALS[terminal.interval].defaultDays),
-    });
-    if (terminal.instrumentToken) params.set("token", String(terminal.instrumentToken));
-
     try {
-      const response = await fetch(`/api/market/candles?${params.toString()}`);
-      const payload = (await response.json()) as {
-        candles?: MarketCandle[];
-        provider?: ProviderInfo;
-        warning?: string;
-        error?: string;
-      };
-      if (!response.ok) throw new Error(payload.error ?? `HTTP ${response.status}`);
+      const result = await getMarketClient().candles({
+        symbol: terminal.symbol,
+        interval: terminal.interval,
+        days: INTERVALS[terminal.interval].defaultDays,
+        instrumentToken: terminal.instrumentToken,
+      });
 
       set((state) => ({
         data: {
           ...state.data,
           [id]: {
-            candles: payload.candles ?? [],
-            provider: payload.provider ?? null,
-            warning: payload.warning,
+            candles: result.candles,
+            provider: result.provider,
+            warning: result.warning,
             loading: false,
             error: null,
             loadedAt: Date.now(),
@@ -232,10 +230,8 @@ export const useWaveStore = create<WaveStore>((set, get) => ({
     if (symbols.length === 0) return;
 
     try {
-      const response = await fetch(`/api/market/quote?symbols=${encodeURIComponent(symbols.join(","))}`);
-      if (!response.ok) return;
-      const payload = (await response.json()) as { quotes?: { key: string; last: number }[] };
-      const byKey = new Map((payload.quotes ?? []).map((quote) => [quote.key, quote.last]));
+      const quotes = await getMarketClient().quotes(symbols);
+      const byKey = new Map(quotes.map((quote) => [quote.key, quote.last]));
 
       const next: Record<string, TerminalData> = { ...data };
       let changed = false;

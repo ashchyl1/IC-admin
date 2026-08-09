@@ -53,7 +53,7 @@ export function ChartTerminal({ terminal, data, focused }: Props) {
   return (
     <section
       className={clsx(
-        "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border bg-[#111823] transition-colors",
+        "flex min-h-[360px] min-w-0 flex-1 flex-col overflow-hidden rounded-lg border bg-[#111823] transition-colors",
         focused ? "border-slate-700" : "border-slate-800/80"
       )}
       aria-label={`Chart terminal ${terminal.id}`}

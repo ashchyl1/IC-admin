@@ -299,6 +299,23 @@ Two caveats about deploying **the wider app**, neither specific to this module:
   `GET` returns an empty list; Copy JSON and the `.json` download carry the
   identical document and work everywhere.
 
+### Standalone build (no server)
+
+`npm run build:artifact` bundles the workspace into a single self-contained HTML
+file at `artifact/wave-lab.html` — React, Lightweight Charts and every
+application module inlined, with the market client swapped for the in-browser
+generator in `src/lib/market/offline-client.ts`. Roughly 450 KB, no network
+required at any point.
+
+Every drawing tool, the degree notation, the rule engine, the Fibonacci and
+Lucas checks, the indicators and the Claude export work unchanged. What it
+cannot do is reach Zerodha, so it runs on generated data and says so in a banner
+across the top. Useful for sharing the tooling with someone who should not be
+handed broker credentials, and for reviewing a build without running the app.
+
+The build output is git-ignored; the source is `artifact/entry.tsx` and
+`scripts/build-artifact.mjs`.
+
 ### Before putting it on a public URL
 
 This app has no authentication — `ADMIN_EMAIL`/`ADMIN_PASSWORD` are placeholders

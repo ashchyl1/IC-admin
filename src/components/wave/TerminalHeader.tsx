@@ -71,12 +71,16 @@ export function TerminalHeader({
         ) : null}
       </div>
 
-      <Segmented
-        ariaLabel="Interval"
-        value={QUICK.includes(terminal.interval) ? terminal.interval : QUICK[0]}
-        onChange={(value) => onInterval(value)}
-        options={QUICK.map((key) => ({ value: key, label: INTERVALS[key].label }))}
-      />
+      {/* Duplicates the dropdown beside it — worth the width on a desktop,
+          not on a phone. */}
+      <div className="hidden lg:block">
+        <Segmented
+          ariaLabel="Interval"
+          value={QUICK.includes(terminal.interval) ? terminal.interval : QUICK[0]}
+          onChange={(value) => onInterval(value)}
+          options={QUICK.map((key) => ({ value: key, label: INTERVALS[key].label }))}
+        />
+      </div>
       <Select
         ariaLabel="All intervals"
         value={terminal.interval}

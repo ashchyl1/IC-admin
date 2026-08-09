@@ -178,7 +178,9 @@ export function WaveLabWorkspace() {
         <main
           className={clsx(
             "flex min-h-0 min-w-0 flex-1 gap-2 p-2",
-            layout === "columns" ? "flex-row" : "flex-col"
+            // Stacked panes scroll rather than shrink: two charts sharing a
+            // phone's height would leave neither tall enough to count on.
+            layout === "columns" ? "flex-row" : "flex-col overflow-y-auto"
           )}
         >
           {!hydrated ? (
