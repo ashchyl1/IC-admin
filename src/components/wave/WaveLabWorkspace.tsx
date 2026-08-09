@@ -11,13 +11,16 @@
  */
 
 import * as React from "react";
-import { Activity, Columns2, PanelRightClose, PanelRightOpen, Rows2, Share2, X } from "lucide-react";
+import { Activity, Columns2, PanelRightClose, PanelRightOpen, Rows2, Share2, Square, X } from "lucide-react";
 
+import { INTERVALS } from "@/lib/market/types";
 import type { TerminalSnapshot } from "@/lib/wave/export";
 import { TOOLS, TOOL_ORDER } from "@/lib/wave/patterns";
 import { LIVE_POLL_INTERVAL_MS, useWaveStore } from "@/lib/wave/store";
 import { Badge, Button, Toggle, clsx } from "@/components/scalper/ui";
 import { ChartTerminal } from "./ChartTerminal";
+import { ConnectZerodha } from "./ConnectZerodha";
+import { PaperTradePanel } from "./PaperTradePanel";
 import { ExportDialog } from "./ExportDialog";
 import { WaveInspector } from "./WaveInspector";
 
@@ -93,9 +96,13 @@ export function WaveLabWorkspace() {
   }));
 
   const focused = terminals.find((terminal) => terminal.id === focusedTerminal) ?? terminals[0];
+  // Both terminals keep loading and keep their counts in single view — only the
+  // rendering is narrowed, so switching back is instant and nothing is lost.
+  const visible = layout === "single" ? [focused].filter(Boolean) : terminals;
   const focusedData = data[focused?.id ?? ""] ?? { candles: [] };
   const simulated = snapshots.some((snapshot) => snapshot.provider && !snapshot.provider.live);
   const totalDrawings = terminals.reduce((sum, terminal) => sum + terminal.drawings.length, 0);
+  const openTrades = store.positions.filter((position) => position.status === "OPEN").length;
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#0b111b] text-slate-200">
@@ -128,8 +135,9 @@ export function WaveLabWorkspace() {
         <div className="inline-flex overflow-hidden rounded-md border border-slate-800 bg-slate-900/60 p-0.5">
           {(
             [
-              { value: "columns" as const, icon: Columns2, title: "Side by side" },
-              { value: "rows" as const, icon: Rows2, title: "Stacked" },
+              { value: "single" as const, icon: Square, title: "One chart" },
+              { value: "columns" as const, icon: Columns2, title: "Two charts, side by side" },
+              { value: "rows" as const, icon: Rows2, title: "Two charts, stacked" },
             ]
           ).map((option) => {
             const Icon = option.icon;
@@ -152,10 +160,45 @@ export function WaveLabWorkspace() {
           })}
         </div>
 
+        {/* With one chart on screen you still need to reach the other one, and
+            which is showing has to be obvious — hence names, not just A / B. */}
+        {layout === "single" ? (
+          <div
+            role="radiogroup"
+            aria-label="Visible chart"
+            className="inline-flex overflow-hidden rounded-md border border-slate-800 bg-slate-900/60 p-0.5"
+          >
+            {terminals.map((terminal) => (
+              <button
+                key={terminal.id}
+                type="button"
+                role="radio"
+                aria-checked={terminal.id === focusedTerminal}
+                title={`Show ${terminal.title} ${INTERVALS[terminal.interval].label}`}
+                onClick={() => store.setFocused(terminal.id)}
+                className={clsx(
+                  "max-w-[150px] truncate rounded px-2 py-1 text-[11px] font-semibold transition-colors",
+                  terminal.id === focusedTerminal
+                    ? "bg-cyan-600 text-white"
+                    : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                )}
+              >
+                {terminal.title} · {INTERVALS[terminal.interval].label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
         <div className="ml-auto flex items-center gap-1.5">
           {simulated ? (
             <Badge tone="amber" title="At least one terminal is showing generated prices, not the market.">
               Simulated data
+            </Badge>
+          ) : null}
+          <ConnectZerodha onNotify={store.notify} onReload={() => void store.loadAll()} />
+          {openTrades > 0 ? (
+            <Badge tone="cyan" title="Simulated positions currently open">
+              {openTrades} paper {openTrades === 1 ? "position" : "positions"}
             </Badge>
           ) : null}
           <Badge tone="slate">{totalDrawings} drawings</Badge>
@@ -188,7 +231,7 @@ export function WaveLabWorkspace() {
               Restoring workspace…
             </div>
           ) : (
-            terminals.map((terminal) => (
+            visible.map((terminal) => (
               <ChartTerminal
                 key={terminal.id}
                 terminal={terminal}
@@ -204,19 +247,48 @@ export function WaveLabWorkspace() {
             className="flex w-[320px] shrink-0 flex-col border-l border-slate-800 bg-[#0d141f]"
             aria-label="Wave inspector"
           >
-            <div className="flex shrink-0 items-center gap-2 border-b border-slate-800 px-3 py-2">
-              <h2 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Inspector</h2>
+            <div className="flex shrink-0 items-center gap-1 border-b border-slate-800 px-2 py-1.5">
+              {(
+                [
+                  { id: false, label: "Inspector" },
+                  { id: true, label: "Paper" },
+                ] as const
+              ).map((tab) => (
+                <button
+                  key={tab.label}
+                  type="button"
+                  aria-pressed={store.paperOpen === tab.id}
+                  onClick={() => store.setPaperOpen(tab.id)}
+                  className={clsx(
+                    "rounded px-2 py-1 text-[11px] font-bold uppercase tracking-wider transition-colors",
+                    store.paperOpen === tab.id
+                      ? "bg-slate-800 text-slate-100"
+                      : "text-slate-500 hover:text-slate-300"
+                  )}
+                >
+                  {tab.label}
+                  {tab.id && openTrades > 0 ? (
+                    <span className="ml-1 rounded bg-cyan-600/30 px-1 text-[9px] text-cyan-200">
+                      {openTrades}
+                    </span>
+                  ) : null}
+                </button>
+              ))}
               <Badge tone="cyan">Chart {focused.id}</Badge>
               <span className="ml-auto truncate text-[10px] text-slate-500">{focused.title}</span>
             </div>
             <div className="min-h-0 flex-1">
-              <WaveInspector
-                terminal={focused}
-                candles={focusedData.candles}
-                onSelect={(drawingId) => store.selectDrawing(focused.id, drawingId)}
-                onUpdate={(drawingId, patch) => store.updateDrawing(focused.id, drawingId, patch)}
-                onDelete={(drawingId) => store.deleteDrawing(focused.id, drawingId)}
-              />
+              {store.paperOpen ? (
+                <PaperTradePanel terminal={focused} candles={focusedData.candles} />
+              ) : (
+                <WaveInspector
+                  terminal={focused}
+                  candles={focusedData.candles}
+                  onSelect={(drawingId) => store.selectDrawing(focused.id, drawingId)}
+                  onUpdate={(drawingId, patch) => store.updateDrawing(focused.id, drawingId, patch)}
+                  onDelete={(drawingId) => store.deleteDrawing(focused.id, drawingId)}
+                />
+              )}
             </div>
           </aside>
         ) : null}
@@ -254,6 +326,7 @@ export function WaveLabWorkspace() {
       <ExportDialog
         open={exportOpen}
         snapshots={snapshots}
+        positions={store.positions}
         onClose={() => store.setExportOpen(false)}
         onImport={(terminalId, json, mode) => store.importDrawings(terminalId, json, mode)}
         onNotify={store.notify}

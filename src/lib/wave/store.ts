@@ -20,6 +20,15 @@ import type { Interval, MarketCandle } from "@/lib/market/types";
 import { INTERVALS } from "@/lib/market/types";
 import { DEFAULT_DEGREE, type DegreeKey } from "./degrees";
 import { TOOLS, defaultVariant, type ToolId } from "./patterns";
+import {
+  DEFAULT_COSTS,
+  closePosition,
+  openPosition,
+  triggeredExit,
+  type ExitReason,
+  type OpenRequest,
+  type PaperPosition,
+} from "./paper";
 import { parseAnalysis } from "./serialize";
 import {
   DEFAULT_INDICATORS,
@@ -36,7 +45,12 @@ import {
 const STORAGE_KEY = "indiacharts.wave-lab.v1";
 const LIVE_POLL_MS = 15_000;
 
-export type LayoutMode = "columns" | "rows";
+/**
+ * `single` shows only the focused terminal. Two panes are the point of the
+ * module, but a single chart is what you want when the count is fiddly, the
+ * screen is small, or you are presenting one timeframe.
+ */
+export type LayoutMode = "single" | "columns" | "rows";
 
 export interface Notice {
   id: string;
@@ -56,6 +70,9 @@ interface WaveStore {
   exportOpen: boolean;
   notices: Notice[];
   hydrated: boolean;
+  /** Simulated positions. No broker is connected; nothing here places an order. */
+  positions: PaperPosition[];
+  paperOpen: boolean;
 
   hydrate: () => void;
   loadTerminal: (id: string) => Promise<void>;
@@ -81,6 +98,12 @@ interface WaveStore {
   deleteDrawing: (id: string, drawingId: string) => void;
   clearDrawings: (id: string) => void;
   importDrawings: (id: string, json: string, mode: "replace" | "append") => void;
+
+  openTrade: (request: OpenRequest) => void;
+  closeTrade: (positionId: string, price: number, reason: ExitReason) => void;
+  updateTrade: (positionId: string, patch: Partial<PaperPosition>) => void;
+  clearClosedTrades: () => void;
+  setPaperOpen: (open: boolean) => void;
 
   setLayout: (layout: LayoutMode) => void;
   toggleSync: () => void;
@@ -152,6 +175,8 @@ export const useWaveStore = create<WaveStore>((set, get) => ({
   exportOpen: false,
   notices: [],
   hydrated: false,
+  positions: [],
+  paperOpen: false,
 
   // ------------------------------------------------------------ lifecycle ---
 
@@ -166,9 +191,10 @@ export const useWaveStore = create<WaveStore>((set, get) => ({
     set((state) => ({
       hydrated: true,
       terminals: restored?.terminals ?? state.terminals,
-      layout: restored?.layout ?? (narrow ? "rows" : state.layout),
+      layout: restored?.layout ?? (narrow ? "single" : state.layout),
       syncCharts: restored?.syncCharts ?? state.syncCharts,
       inspectorOpen: narrow ? false : state.inspectorOpen,
+      positions: restored?.positions ?? state.positions,
     }));
     void get().loadAll();
   },
@@ -256,6 +282,30 @@ export const useWaveStore = create<WaveStore>((set, get) => ({
       }
 
       if (changed) set({ data: next });
+
+      // A stop or target that the tape has passed should not wait for the
+      // analyst to notice it. The forming bar is the evidence, so exits are
+      // settled from the same update that moved the chart.
+      const exits: { id: string; price: number; reason: "STOP" | "TARGET" }[] = [];
+      for (const position of get().positions) {
+        if (position.status !== "OPEN") continue;
+        const terminal = terminals.find((entry) => entry.id === position.terminalId);
+        const bar = terminal ? next[terminal.id]?.candles.at(-1) : undefined;
+        if (!bar) continue;
+        const hit = triggeredExit(position, bar);
+        if (hit && hit.reason !== "MANUAL") exits.push({ id: position.id, ...hit, reason: hit.reason });
+      }
+
+      for (const exit of exits) {
+        get().closeTrade(exit.id, exit.price, exit.reason);
+        const position = get().positions.find((entry) => entry.id === exit.id);
+        get().notify(
+          exit.reason === "TARGET" ? "success" : "info",
+          `${position?.title ?? "Position"} closed at ${exit.price} — ${
+            exit.reason === "TARGET" ? "target" : "stop"
+          } hit.`
+        );
+      }
     } catch {
       // A failed poll is not worth a notice — the next one is 15 seconds away.
     }
@@ -461,6 +511,46 @@ export const useWaveStore = create<WaveStore>((set, get) => ({
     for (const warning of result.warnings.slice(0, 3)) get().notify("info", warning);
   },
 
+  // --------------------------------------------------------- paper trading ---
+
+  openTrade: (request) => {
+    const position = openPosition(request);
+    set((state) => ({ positions: [...state.positions, position] }));
+    persist(get());
+    get().notify(
+      "success",
+      `Paper ${request.side} ${request.quantity} ${request.title} @ ${request.entryPrice} — simulated, no order was placed.`
+    );
+  },
+
+  closeTrade: (positionId, price, reason) => {
+    const now = get().data[get().focusedTerminal]?.candles.at(-1)?.time ?? Math.floor(Date.now() / 1000);
+    set((state) => ({
+      positions: state.positions.map((position) =>
+        position.id === positionId && position.status === "OPEN"
+          ? closePosition(position, price, now, reason, DEFAULT_COSTS)
+          : position
+      ),
+    }));
+    persist(get());
+  },
+
+  updateTrade: (positionId, patch) => {
+    set((state) => ({
+      positions: state.positions.map((position) =>
+        position.id === positionId ? { ...position, ...patch } : position
+      ),
+    }));
+    persist(get());
+  },
+
+  clearClosedTrades: () => {
+    set((state) => ({ positions: state.positions.filter((position) => position.status === "OPEN") }));
+    persist(get());
+  },
+
+  setPaperOpen: (open) => set({ paperOpen: open }),
+
   // ------------------------------------------------------------ workspace ---
 
   setLayout: (layout) => {
@@ -510,6 +600,7 @@ interface Persisted {
   terminals: TerminalState[];
   layout: LayoutMode;
   syncCharts: boolean;
+  positions: PaperPosition[];
 }
 
 function persist(state: WaveStore): void {
@@ -522,6 +613,7 @@ function persist(state: WaveStore): void {
       terminals: state.terminals.map((terminal) => ({ ...terminal, activeTool: "cursor" as ToolId })),
       layout: state.layout,
       syncCharts: state.syncCharts,
+      positions: state.positions,
     };
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   } catch {
@@ -547,7 +639,7 @@ function readStorage(): Persisted | null {
       activeTool: "cursor" as ToolId,
       selectedId: null,
     }));
-    return { ...parsed, terminals };
+    return { ...parsed, terminals, positions: Array.isArray(parsed.positions) ? parsed.positions : [] };
   } catch {
     return null;
   }

@@ -21,11 +21,13 @@ import {
   type CandlePolicy,
   type TerminalSnapshot,
 } from "@/lib/wave/export";
+import type { PaperPosition } from "@/lib/wave/paper";
 import { Badge, Button, Segmented, clsx } from "@/components/scalper/ui";
 
 interface Props {
   open: boolean;
   snapshots: TerminalSnapshot[];
+  positions: PaperPosition[];
   onClose: () => void;
   onImport: (terminalId: string, json: string, mode: "replace" | "append") => void;
   onNotify: (tone: "info" | "error" | "success", message: string) => void;
@@ -38,7 +40,7 @@ const POLICIES: { value: CandlePolicy; label: string; title: string }[] = [
   { value: "none", label: "No bars", title: "Wave measurements and rule results only" },
 ];
 
-export function ExportDialog({ open, snapshots, onClose, onImport, onNotify }: Props) {
+export function ExportDialog({ open, snapshots, positions, onClose, onImport, onNotify }: Props) {
   const [policy, setPolicy] = React.useState<CandlePolicy>(DEFAULT_EXPORT_OPTIONS.candles);
   const [question, setQuestion] = React.useState("");
   const [tab, setTab] = React.useState<"export" | "import">("export");
@@ -49,12 +51,16 @@ export function ExportDialog({ open, snapshots, onClose, onImport, onNotify }: P
 
   const bundle = React.useMemo(
     () =>
-      buildBundle(snapshots, {
-        ...DEFAULT_EXPORT_OPTIONS,
-        candles: policy,
-        question: question.trim() === "" ? undefined : question.trim(),
-      }),
-    [snapshots, policy, question]
+      buildBundle(
+        snapshots,
+        {
+          ...DEFAULT_EXPORT_OPTIONS,
+          candles: policy,
+          question: question.trim() === "" ? undefined : question.trim(),
+        },
+        positions
+      ),
+    [snapshots, policy, question, positions]
   );
 
   const json = React.useMemo(() => JSON.stringify(bundle, null, 2), [bundle]);

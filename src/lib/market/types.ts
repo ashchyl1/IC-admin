@@ -161,6 +161,34 @@ export interface MarketProvider {
   quotes(keys: string[]): Promise<MarketQuote[]>;
   /** Instrument search — powers the symbol picker. */
   search(query: string, limit: number): Promise<Instrument[]>;
+
+  /** What the provider can see right now — powers `/api/market/status`. */
+  diagnostics?(): Promise<ProviderDiagnostics>;
+
+  /**
+   * Start an interactive login, for providers whose session is bound to a
+   * browser sign-in. Returns the URL the user has to open.
+   */
+  login?(): Promise<LoginChallenge>;
+}
+
+export interface ProviderDiagnostics {
+  provider: ProviderInfo;
+  /** True once the provider can actually answer data requests. */
+  ready: boolean;
+  /** Set when `ready` is false and a sign-in would fix it. */
+  needsLogin?: boolean;
+  /** Tool or endpoint names the provider discovered, for eyeballing a mismatch. */
+  discovered?: string[];
+  /** Which discovered tool was chosen for each job. */
+  resolved?: Record<string, string | null>;
+  detail?: string;
+}
+
+export interface LoginChallenge {
+  /** Open this in a browser to authorise the session. */
+  url: string | null;
+  message: string;
 }
 
 export class ProviderError extends Error {

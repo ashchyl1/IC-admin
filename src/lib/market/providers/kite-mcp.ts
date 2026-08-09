@@ -25,9 +25,11 @@ import {
   ProviderError,
   type CandleRequest,
   type Instrument,
+  type LoginChallenge,
   type MarketCandle,
   type MarketProvider,
   type MarketQuote,
+  type ProviderDiagnostics,
   type ProviderInfo,
 } from "../types";
 
@@ -47,6 +49,16 @@ interface JsonRpcResponse {
 
 /** Any tool whose name matches this is refused, whatever discovery decided. */
 const WRITE_PATTERN = /(place|modify|cancel|exit|square|order|gtt|basket|withdraw|fund)/i;
+
+/** Matches the sign-in tool. Kite MCP binds a session to a browser login. */
+const LOGIN_PATTERN = /login|authori[sz]e|authenticate|connect/i;
+
+/** Wording that means "sign in first", across the phrasings Kite MCP uses. */
+const NEEDS_LOGIN_PATTERN =
+  /\b(login|log in|sign[- ]?in|not authori[sz]ed|unauthori[sz]ed|session (has )?expired|authenticate)\b/i;
+
+/** Anything that looks like a Kite Connect login URL in a tool's reply. */
+const URL_PATTERN = /https?:\/\/[^\s"'<>)\]]+/g;
 
 export interface KiteMcpOptions {
   url: string;
@@ -252,6 +264,90 @@ export class KiteMcpProvider implements MarketProvider {
     return toInstruments(payload).slice(0, limit);
   }
 
+  // --------------------------------------------------------------- session ---
+
+  /**
+   * Start the interactive sign-in.
+   *
+   * Kite MCP ties an authorised Kite session to the MCP session id, so the
+   * provider instance is cached per endpoint (see `market/index.ts`) and this
+   * must run against the same instance that later fetches candles.
+   */
+  async login(): Promise<LoginChallenge> {
+    const tools = await this.tools();
+    const tool = tools.find((entry) => LOGIN_PATTERN.test(entry.name));
+    if (!tool) {
+      return {
+        url: null,
+        message:
+          "This MCP endpoint exposes no login tool. If it is a local bridge, it is probably already " +
+          `authorised. Tools seen: ${tools.map((t) => t.name).join(", ") || "none"}`,
+      };
+    }
+
+    await this.handshake();
+    const result = await this.rpc("tools/call", { name: tool.name, arguments: {} });
+    const payload = extractToolPayload(result, tool.name, true);
+    const text = typeof payload === "string" ? payload : JSON.stringify(payload ?? "");
+    const url = text.match(URL_PATTERN)?.[0] ?? null;
+
+    return {
+      url,
+      message: url
+        ? "Open the link, sign in to Kite, then reload the chart."
+        : `Login tool "${tool.name}" returned no URL: ${truncate(text, 200)}`,
+    };
+  }
+
+  /**
+   * What the provider can actually see. This is the diagnostic that turns
+   * pointing at a new endpoint from a debugging session into a glance: it
+   * reports the tools discovered and which one was picked for each job, so a
+   * renamed tool is visible rather than mysterious.
+   */
+  async diagnostics(): Promise<ProviderDiagnostics> {
+    try {
+      const tools = await this.tools();
+      const names = tools.map((tool) => tool.name);
+      const pickName = (match: RegExp) => names.find((name) => match.test(name)) ?? null;
+      const resolved = {
+        historical: pickName(/historical|candle/i),
+        quotes: pickName(/quote|ltp|ohlc/i),
+        search: pickName(/search.*instrument|instrument.*search|search_symbols/i),
+        login: pickName(LOGIN_PATTERN),
+      };
+
+      // Cheapest possible authorisation probe: a search returns nothing
+      // sensitive but still fails when the session is not signed in.
+      let ready = resolved.search !== null;
+      let needsLogin = false;
+      let detail: string | undefined;
+
+      if (resolved.search) {
+        try {
+          await this.search("NIFTY", 1);
+        } catch (error) {
+          ready = false;
+          const message = error instanceof Error ? error.message : String(error);
+          needsLogin = error instanceof ProviderError && error.status === 401;
+          detail = message;
+        }
+      } else {
+        detail = "No instrument-search tool found on this endpoint.";
+      }
+
+      return { provider: this.info, ready, needsLogin, discovered: names, resolved, detail };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        provider: this.info,
+        ready: false,
+        needsLogin: error instanceof ProviderError && error.status === 401,
+        detail: message,
+      };
+    }
+  }
+
   /** Resolve `NSE:INFY` to a full instrument so we have a token for candles. */
   private async resolve(key: string): Promise<Instrument | null> {
     const [exchange, symbol] = splitKey(key);
@@ -313,7 +409,7 @@ function parseRpcBody(text: string): JsonRpcResponse | null {
  * MCP tool results carry the useful data in `structuredContent`, or in a text
  * block that happens to contain JSON. Prefer the former and fall back.
  */
-function extractToolPayload(result: unknown, toolName: string): unknown {
+function extractToolPayload(result: unknown, toolName: string, isLoginCall = false): unknown {
   const record = result as
     | { content?: unknown; structuredContent?: unknown; isError?: boolean }
     | null
@@ -321,7 +417,14 @@ function extractToolPayload(result: unknown, toolName: string): unknown {
   if (!record) return null;
 
   if (record.isError) {
-    throw new ProviderError(`MCP tool ${toolName} reported an error: ${textOf(record.content)}`, PROVIDER);
+    // A refusal for want of a sign-in arrives as an ordinary tool error, not an
+    // HTTP 401, so classify it here or the UI cannot offer the one fix.
+    const message = textOf(record.content);
+    throw new ProviderError(
+      `MCP tool ${toolName} reported an error: ${message}`,
+      PROVIDER,
+      NEEDS_LOGIN_PATTERN.test(message) ? 401 : 502
+    );
   }
   if (record.structuredContent !== undefined && record.structuredContent !== null) {
     return unwrapSingleKey(record.structuredContent);
@@ -330,7 +433,9 @@ function extractToolPayload(result: unknown, toolName: string): unknown {
   const text = textOf(record.content);
   if (text === "") return record.content ?? null;
 
-  const needsLogin = /login|authenticate|session (has )?expired|unauthori[sz]ed/i.test(text);
+  // The login tool's own reply says "sign in" by its nature; classifying that
+  // as a failure would make the fix look like the problem.
+  const needsLogin = !isLoginCall && NEEDS_LOGIN_PATTERN.test(text);
   try {
     return unwrapSingleKey(JSON.parse(text) as unknown);
   } catch {

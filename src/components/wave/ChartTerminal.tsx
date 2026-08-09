@@ -13,6 +13,7 @@ import * as React from "react";
 import type { Instrument, Interval, MarketCandle } from "@/lib/market/types";
 import { computeMetrics } from "@/lib/wave/metrics";
 import { TOOLS, labelAt } from "@/lib/wave/patterns";
+import { levelsForPositions } from "@/lib/wave/paper-levels";
 import { validate } from "@/lib/wave/rules";
 import { decorateLabel } from "@/lib/wave/degrees";
 import { useWaveStore } from "@/lib/wave/store";
@@ -45,6 +46,11 @@ export function ChartTerminal({ terminal, data, focused }: Props) {
     }
     return failing;
   }, [terminal.drawings, data.candles]);
+
+  const positionLevels = React.useMemo(
+    () => levelsForPositions(store.positions, terminal.symbol),
+    [store.positions, terminal.symbol]
+  );
 
   const spec = TOOLS[terminal.activeTool];
   const placed = draft?.points.length ?? 0;
@@ -112,6 +118,7 @@ export function ChartTerminal({ terminal, data, focused }: Props) {
             <WaveChart
               terminal={terminal}
               data={data}
+              positions={positionLevels}
               draft={draft}
               invalidIds={invalidIds}
               focused={focused}

@@ -19,6 +19,7 @@ import { formatPct, formatRatio, upcomingTimeBars } from "./fib";
 import { computeIndicators, lastValue } from "./indicators";
 import { computeMetrics, type DrawingMetrics } from "./metrics";
 import { TOOLS, variantSpec } from "./patterns";
+import { pnlOf, rMultiple, summarise, type PaperPosition } from "./paper";
 import { validate, type Validation } from "./rules";
 import { barIndexer, type Drawing, type TerminalState } from "./types";
 
@@ -120,12 +121,39 @@ export interface TerminalExport {
   candles?: { columns: string[]; rows: (string | number)[][] };
 }
 
+export interface PaperTradeExport {
+  id: string;
+  symbol: string;
+  side: string;
+  quantity: number;
+  entry: { price: number; iso: string };
+  stopLoss: number | null;
+  target: number | null;
+  status: string;
+  exit?: { price: number; iso: string; reason: string };
+  pnl: number;
+  rMultiple: number | null;
+  /** The wave count this trade was taken on, when it was linked to one. */
+  onCount?: string;
+  note?: string;
+}
+
 export interface WaveAnalysisBundle {
   schema: typeof SCHEMA_ID;
   generatedAt: string;
   source: { app: string; module: string; timezone: string };
   question?: string;
   terminals: TerminalExport[];
+  /**
+   * Simulated trades. Included so a review can ask whether the count was right
+   * *and* whether it was traded well — two different questions that a bare set
+   * of labels cannot answer. No broker was involved in any of these.
+   */
+  paperTrades?: {
+    simulated: true;
+    summary: { net: number; realised: number; unrealised: number; wins: number; losses: number; totalR: number | null };
+    trades: PaperTradeExport[];
+  };
 }
 
 export interface TerminalSnapshot {
@@ -136,8 +164,14 @@ export interface TerminalSnapshot {
 
 export function buildBundle(
   terminals: TerminalSnapshot[],
-  options: ExportOptions = DEFAULT_EXPORT_OPTIONS
+  options: ExportOptions = DEFAULT_EXPORT_OPTIONS,
+  positions: PaperPosition[] = []
 ): WaveAnalysisBundle {
+  const lastFor = (position: PaperPosition) => {
+    const terminal = terminals.find((entry) => entry.state.symbol === position.symbol);
+    return terminal?.candles[terminal.candles.length - 1]?.close ?? null;
+  };
+
   return {
     schema: SCHEMA_ID,
     generatedAt: new Date().toISOString(),
@@ -148,6 +182,43 @@ export function buildBundle(
     },
     question: options.question,
     terminals: terminals.map((terminal) => buildTerminal(terminal, options)),
+    paperTrades:
+      positions.length === 0
+        ? undefined
+        : {
+            simulated: true,
+            summary: (() => {
+              const totals = summarise(positions, lastFor);
+              return {
+                net: round(totals.net),
+                realised: round(totals.realised),
+                unrealised: round(totals.unrealised),
+                wins: totals.wins,
+                losses: totals.losses,
+                totalR: totals.totalR === null ? null : round(totals.totalR, 2),
+              };
+            })(),
+            trades: positions.map((position) => ({
+              id: position.id,
+              symbol: position.symbol,
+              side: position.side,
+              quantity: position.quantity,
+              entry: { price: position.entryPrice, iso: isoOf(position.entryTime) },
+              stopLoss: position.stopLoss,
+              target: position.target,
+              status: position.status,
+              exit: position.exit
+                ? { price: position.exit.price, iso: isoOf(position.exit.time), reason: position.exit.reason }
+                : undefined,
+              pnl: round(pnlOf(position, lastFor(position))),
+              rMultiple: (() => {
+                const r = rMultiple(position, lastFor(position));
+                return r === null ? null : round(r, 2);
+              })(),
+              onCount: position.drawingLabel,
+              note: position.note,
+            })),
+          },
   };
 }
 
@@ -512,6 +583,27 @@ export function toMarkdown(bundle: WaveAnalysisBundle): string {
           `**Invalidation:** ${drawing.validation.invalidation.price} — ${drawing.validation.invalidation.reason}`
         );
       }
+    }
+  }
+
+  if (bundle.paperTrades && bundle.paperTrades.trades.length > 0) {
+    const { summary, trades } = bundle.paperTrades;
+    lines.push("");
+    lines.push("## Paper trades (simulated — no broker was involved)");
+    lines.push("");
+    lines.push(
+      `Net ${summary.net} · realised ${summary.realised} · open ${summary.unrealised} · ` +
+        `${summary.wins}W / ${summary.losses}L${summary.totalR === null ? "" : ` · ${summary.totalR}R`}`
+    );
+    lines.push("");
+    lines.push("| Side | Qty | Entry | Stop | Target | Exit | P&L | R | On count |");
+    lines.push("|---|---:|---:|---:|---:|---|---:|---:|---|");
+    for (const trade of trades) {
+      lines.push(
+        `| ${trade.side} | ${trade.quantity} | ${trade.entry.price} | ${trade.stopLoss ?? "—"} | ` +
+          `${trade.target ?? "—"} | ${trade.exit ? `${trade.exit.price} (${trade.exit.reason})` : "open"} | ` +
+          `${trade.pnl} | ${trade.rMultiple ?? "—"} | ${trade.onCount ?? "—"} |`
+      );
     }
   }
 

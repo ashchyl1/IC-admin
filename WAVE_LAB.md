@@ -9,7 +9,7 @@ an order path.
 
 ---
 
-## Why two terminals
+## One chart or two
 
 Elliott work is comparative. A count that only survives on one timeframe is not
 a count, and Phase 6 of the analysis SOP — multi-timeframe confirmation — is a
@@ -17,6 +17,12 @@ glance rather than a task when the higher degree and the trading timeframe are
 side by side. The panes open on NIFTY daily and NIFTY hourly; each carries its
 own instrument, interval, chart type, indicators and wave count. **Sync charts**
 ties their pan, zoom and crosshair together.
+
+The layout control in the header offers **one chart**, **two side by side**, or
+**two stacked**. In single view a chip row names the two terminals so you can
+swap between them; both keep loading and keep their counts either way, so
+switching back is instant and nothing is lost. Narrow screens start in single
+view with the inspector folded away.
 
 ---
 
@@ -245,6 +251,8 @@ src/lib/market/          data layer, shared with nothing else
   index.ts               provider resolution + fallback chain
 
 src/lib/wave/            the domain, all pure — no React, no chart
+  paper.ts               simulated positions, costs, R multiples, exits
+  paper-levels.ts        open positions as chart price lines
   degrees.ts             nine degrees and their label decoration
   patterns.ts            the tool definitions and their variants
   fib.ts                 Fibonacci/Lucas tables, ratio and time matching
@@ -298,6 +306,79 @@ Two caveats about deploying **the wider app**, neither specific to this module:
   read-only host `POST /api/wave/analysis` returns 501 with an explanation and
   `GET` returns an empty list; Copy JSON and the `.json` download carry the
   identical document and work everywhere.
+
+## Paper trading
+
+**Simulated only** — no broker is connected and nothing in this module can place
+an order.
+
+The **Paper** tab beside the inspector turns a count into a trade. The ticket is
+prefilled from the selected count rather than from nothing:
+
+- **Stop** — the count's own invalidation level, with the reason shown ("End of
+  wave 1 — wave 4 entering this level invalidates the impulse").
+- **Target** — a 1.618 projection of the pattern's first leg from its last pivot.
+- **Side** — the direction the count runs.
+- **Quantity** — from a risk budget: type what you are willing to lose and the
+  ticket sizes the position off the distance to the stop.
+
+The ticket refuses an incoherent order. A long whose stop sits above its entry
+is not a risky trade but an impossible one, and the prefill can suggest exactly
+that when the count sits well away from spot — so the levels are checked against
+the side and the submit button stays disabled until they agree.
+
+Open positions draw their entry, stop and target on the chart as solid lines
+(analysis stays dashed), and are settled from the same 15-second quote poll that
+moves the chart: when a bar trades through a level the position closes itself.
+**A bar spanning both the stop and the target is resolved as the stop** — OHLC
+cannot say which came first, and a paper engine that guesses in its own favour
+teaches the wrong lesson.
+
+The journal keeps entry, exit, reason, P&L after costs, R multiple, and the wave
+count each trade was taken on. Costs default to ₹20 a side plus 0.06% of
+turnover — adjust `DEFAULT_COSTS` in `src/lib/wave/paper.ts`; the point is that a
+paper P&L ignoring costs flatters every strategy.
+
+Trades ride along in the Claude export, so a review can ask both whether the
+count was right *and* whether it was traded well.
+
+---
+
+### Connecting to Zerodha MCP
+
+The header's connection badge reports the live state and runs the sign-in. Kite
+MCP binds an authorised Kite session to the MCP session id, so connecting is a
+browser round trip: the provider calls the endpoint's `login` tool, you open the
+URL it returns, sign in, and come back.
+
+Because the session lives on the provider instance, providers are **cached per
+endpoint** — a fresh one per request would sign in on one session and then query
+on another, forever.
+
+`GET /api/market/status` is the diagnostic. It reports the provider chain, the
+tools discovered on the endpoint, which tool was picked for each job, and
+whether the session needs a login — so pointing the app at a different MCP
+endpoint is a glance rather than a debugging session:
+
+```json
+{
+  "mode": "kite-mcp",
+  "active": { "label": "Zerodha Kite MCP", "live": true },
+  "diagnostics": {
+    "ready": true,
+    "discovered": ["login", "get_historical_data", "get_quotes", "search_instruments"],
+    "resolved": { "historical": "get_historical_data", "quotes": "get_quotes", "search": "search_instruments" }
+  }
+}
+```
+
+**Testing without a broker.** `node scripts/mock-kite-mcp.mjs 4111` starts a
+stand-in that speaks the real transport — session ids, SSE framing, Kite's tool
+names and schemas, Kite's response shapes, and the signed-out refusal. Point
+`KITE_MCP_URL` at it to exercise the whole path, including the login flow.
+`tests/kite-mcp.test.ts` drives the provider against it on every test run.
+
+---
 
 ### Deploying to Vercel
 
@@ -357,6 +438,14 @@ link, or deploy without broker credentials and let it serve simulated data.
 
 ## Tests
 
-`npx vitest run tests/wave-rules.test.ts` — 51 cases over the rule engine
-(every hard rule, both directions, each variant), the metrics, the
-Fibonacci/Lucas tables, the indicators, the degree notation and the hit-testing.
+`npx vitest run` — 191 cases, of which this module owns:
+
+- `tests/wave-rules.test.ts` — the rule engine (every hard rule, both
+  directions, each variant), metrics, the Fibonacci/Lucas tables, indicators,
+  degree notation and hit-testing.
+- `tests/wave-paper.test.ts` — the paper engine: P&L both ways, costs, R
+  multiples, position sizing, exit triggers (including the stop-wins rule for a
+  bar that spans both levels), the portfolio summary and ticket validation.
+- `tests/kite-mcp.test.ts` — the MCP provider against the mock server:
+  handshake, tool discovery, the signed-out path, login, candles, quotes,
+  search, `+0530` timestamps, and the read-only guard.

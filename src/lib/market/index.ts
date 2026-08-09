@@ -42,17 +42,31 @@ export function configuredMode(): ProviderMode {
   }
 }
 
+/**
+ * MCP providers are cached per endpoint rather than rebuilt per request.
+ * The session id the server hands back on `initialize` — and the login bound to
+ * it — live on the instance, so a fresh provider on every request would sign in
+ * on one session and then query on another, forever.
+ */
+const mcpCache = new Map<string, KiteMcpProvider>();
+
 function build(id: ProviderId): MarketProvider | null {
   switch (id) {
     case "kite-mcp": {
       const url = env("KITE_MCP_URL");
-      return url
-        ? new KiteMcpProvider({
-            url,
-            token: env("KITE_MCP_TOKEN"),
-            timeoutMs: Number(env("KITE_MCP_TIMEOUT_MS") ?? 20_000) || 20_000,
-          })
-        : null;
+      if (!url) return null;
+      const token = env("KITE_MCP_TOKEN");
+      const key = `${url}|${token ?? ""}`;
+      let provider = mcpCache.get(key);
+      if (!provider) {
+        provider = new KiteMcpProvider({
+          url,
+          token,
+          timeoutMs: Number(env("KITE_MCP_TIMEOUT_MS") ?? 20_000) || 20_000,
+        });
+        mcpCache.set(key, provider);
+      }
+      return provider;
     }
     case "bridge": {
       const url = env("ZERODHA_BRIDGE_URL");

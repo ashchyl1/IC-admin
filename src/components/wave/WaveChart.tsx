@@ -37,6 +37,7 @@ import {
 } from "lightweight-charts";
 
 import type { MarketCandle } from "@/lib/market/types";
+import type { PositionLevels } from "@/lib/wave/paper-levels";
 import { DEGREES, decorateLabel } from "@/lib/wave/degrees";
 import { RETRACEMENT_LEVELS, EXTENSION_LEVELS } from "@/lib/wave/fib";
 import { hitTest, type HitShape } from "@/lib/wave/hit";
@@ -56,6 +57,8 @@ const BB_FILL = "rgba(129,140,248,0.10)";
 interface Props {
   terminal: TerminalState;
   data: TerminalData;
+  /** Open simulated positions on this terminal, drawn as entry/stop/target lines. */
+  positions: PositionLevels[];
   draft: Drawing | null;
   /** Drawings whose hard rules fail — drawn with a warning outline. */
   invalidIds: Set<string>;
@@ -78,6 +81,7 @@ interface DragState {
 export function WaveChart({
   terminal,
   data,
+  positions,
   draft,
   invalidIds,
   focused,
@@ -94,6 +98,7 @@ export function WaveChart({
   const volumeRef = React.useRef<ISeriesApi<"Histogram"> | null>(null);
   const overlayRefs = React.useRef<ISeriesApi<"Line">[]>([]);
   const priceLinesRef = React.useRef<IPriceLine[]>([]);
+  const positionLinesRef = React.useRef<IPriceLine[]>([]);
 
   const [shapes, setShapes] = React.useState<OverlayShape[]>([]);
   const [bandPath, setBandPath] = React.useState<string | null>(null);
@@ -176,6 +181,7 @@ export function WaveChart({
       volumeRef.current = null;
       overlayRefs.current = [];
       priceLinesRef.current = [];
+      positionLinesRef.current = [];
     };
   }, []);
 
@@ -188,6 +194,7 @@ export function WaveChart({
       chart.removeSeries(priceRef.current);
       priceRef.current = null;
       priceLinesRef.current = [];
+      positionLinesRef.current = [];
     }
 
     const series =
@@ -329,6 +336,30 @@ export function WaveChart({
       }),
     ];
   }, [terminal.drawings, terminal.selectedId, terminal.chartType]);
+
+  // ------------------------------------------------------ position levels ---
+  React.useEffect(() => {
+    const series = priceRef.current;
+    if (!series) return;
+
+    for (const line of positionLinesRef.current) series.removePriceLine(line);
+    positionLinesRef.current = [];
+
+    // An open paper position is the one thing on this chart with money behind
+    // it, so its levels are drawn solid while analysis stays dashed.
+    positionLinesRef.current = positions.flatMap((position) =>
+      position.levels.map((level) =>
+        series.createPriceLine({
+          price: level.price,
+          color: level.color,
+          lineWidth: 1,
+          lineStyle: level.kind === "entry" ? LineStyle.Solid : LineStyle.Dotted,
+          axisLabelVisible: true,
+          title: level.title,
+        })
+      )
+    );
+  }, [positions, terminal.chartType]);
 
   // ------------------------------------------------------------ projection ---
   const project = React.useCallback(

@@ -7,7 +7,14 @@
  * here, so neither the store nor any component knows which it is.
  */
 
-import type { Instrument, Interval, MarketCandle, ProviderInfo } from "./types";
+import type {
+  Instrument,
+  Interval,
+  LoginChallenge,
+  MarketCandle,
+  ProviderDiagnostics,
+  ProviderInfo,
+} from "./types";
 
 export interface CandleQuery {
   symbol: string;
@@ -27,10 +34,21 @@ export interface QuoteResult {
   last: number;
 }
 
+export interface MarketStatus {
+  mode: string;
+  chain: ProviderInfo[];
+  active: ProviderInfo | null;
+  canLogin: boolean;
+  diagnostics: ProviderDiagnostics | null;
+}
+
 export interface MarketClient {
   candles(query: CandleQuery): Promise<CandleResult>;
   quotes(symbols: string[]): Promise<QuoteResult[]>;
   search(query: string, limit: number): Promise<Instrument[]>;
+  /** Omitted by clients with no server behind them, e.g. the standalone build. */
+  status?(): Promise<MarketStatus>;
+  login?(): Promise<LoginChallenge & { provider: ProviderInfo }>;
 }
 
 /** Talks to this app's own route handlers. */
@@ -67,6 +85,23 @@ export const httpMarketClient: MarketClient = {
     const payload = (await response.json()) as { instruments?: Instrument[]; error?: string };
     if (!response.ok) throw new Error(payload.error ?? `HTTP ${response.status}`);
     return payload.instruments ?? [];
+  },
+
+  async status() {
+    const response = await fetch("/api/market/status");
+    const payload = (await response.json()) as MarketStatus & { error?: string };
+    if (!response.ok) throw new Error(payload.error ?? `HTTP ${response.status}`);
+    return payload;
+  },
+
+  async login() {
+    const response = await fetch("/api/market/status?login=1");
+    const payload = (await response.json()) as LoginChallenge & {
+      provider: ProviderInfo;
+      error?: string;
+    };
+    if (!response.ok) throw new Error(payload.error ?? `HTTP ${response.status}`);
+    return payload;
   },
 };
 
