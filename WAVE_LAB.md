@@ -299,6 +299,33 @@ Two caveats about deploying **the wider app**, neither specific to this module:
   `GET` returns an empty list; Copy JSON and the `.json` download carry the
   identical document and work everywhere.
 
+### Deploying to Vercel
+
+The repository needs no Vercel-specific config — Next.js is detected, and
+`prisma generate` runs from `postinstall` so a cached `node_modules` cannot
+leave a stale client behind.
+
+1. **vercel.com → Add New → Project → Import** `ashchyl1/IC-admin`.
+2. Leave the framework preset (Next.js), build command and output directory
+   alone.
+3. Add environment variables before the first deploy:
+   - `MARKET_PROVIDER` — `kite-mcp`, `bridge`, `kite-rest`, or leave unset for
+     `auto`.
+   - the credentials for whichever provider you picked (see the table above).
+   - `MARKET_ALLOW_SYNTHETIC=0` so a misconfigured provider fails loudly rather
+     than drawing invented prices.
+   - `DATABASE_URL` — only if you want the recommendations pages too; it must be
+     a `postgresql://` URL, with `provider` in `prisma/schema.prisma` changed to
+     match. `/wave-lab` does not read it.
+   - `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` —
+     only if you want `/paper-trading`; its middleware needs them.
+4. Deploy, then open `/wave-lab` on the generated URL.
+
+A local bridge on `localhost:8000` is not reachable from Vercel's servers. With
+`MARKET_PROVIDER=bridge` the bridge has to be on a public hostname, which is a
+good reason to prefer `kite-mcp` or `kite-rest` for a hosted deployment and keep
+the bridge for local work.
+
 ### Standalone build (no server)
 
 `npm run build:artifact` bundles the workspace into a single self-contained HTML

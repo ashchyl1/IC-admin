@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "node scripts/with-system-ca.mjs next start -p 3040",
     "lint": "next lint",
+    "postinstall": "prisma generate",
     "seed": "node prisma/seed.mjs",
     "db:push": "prisma db push",
     "db:reset": "prisma db push --force-reset && node prisma/seed.mjs",
