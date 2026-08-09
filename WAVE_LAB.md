@@ -423,6 +423,19 @@ developer console character for character — Zerodha ignores any redirect passe
 at login time, so a mismatch shows up as a login that lands somewhere odd rather
 than as an error.
 
+Check it before you start — the sign-in fails in a handful of predictable ways,
+and most of them look like a redirect that went nowhere rather than an error:
+
+```bash
+npm run kite:doctor
+```
+
+It verifies the key and secret are both set, that the redirect URL is
+well-formed, that `api.kite.trade` and `kite.zerodha.com` are actually
+reachable from this machine (a sandboxed or corporate network can deny egress
+with a 403 that looks like a response), and whether a stored token is still
+alive. It exits non-zero when something would block the login.
+
 Then open the connection badge and choose **Sign in with Kite Connect**. The app
 sends you to Zerodha, Zerodha returns a one-time `request_token`, and the app
 exchanges it for an access token by proving it holds the secret

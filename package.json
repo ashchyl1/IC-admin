@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "build:artifact": "node scripts/build-artifact.mjs",
+    "kite:doctor": "node scripts/kite-doctor.mjs",
     "paper:types": "supabase gen types typescript --project-id $SUPABASE_PROJECT_ID > src/lib/supabase/types.ts",
     "paper:migrate": "supabase db push",
     "paper:test": "psql \"$SUPABASE_DB_URL\" -f supabase/tests/engine_tests.sql"
