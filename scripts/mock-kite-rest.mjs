@@ -116,7 +116,11 @@ createServer((req, res) => {
   }
 
   // -------------------------------------------------------- market data ---
-  const historical = url.pathname.match(/^\/instruments\/historical\/(\d+)\/([a-z]+)$/);
+  // Kite's interval names carry digits (`3minute`, `60minute`), and the
+  // historical path lives under /instruments — so a letters-only pattern here
+  // silently falls through to the CSV dump below and the client sees a
+  // "non-JSON response" for every intraday timeframe.
+  const historical = url.pathname.match(/^\/instruments\/historical\/(\d+)\/([a-z0-9]+)$/);
   if (historical) {
     return json(res, 200, {
       status: "success",
