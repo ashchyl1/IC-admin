@@ -43,6 +43,8 @@ Handy scripts: `npm run db:reset` (force-reset schema + reseed).
 | POST | `/api/import[?dryRun=1]` | `.xlsx` (multipart) **or** JSON `{rows:[…]}` feed |
 | GET | `/api/export` | multi-sheet `.xlsx` (honors `?ids=` or list filters) |
 | POST | `/api/upload` | chart image → `/public/uploads`, returns `{url}` |
+| GET | `/api/market/candles` · `/api/market/quote` · `/api/market/search` | Zerodha-backed market data for Wave Lab |
+| GET/POST | `/api/wave/analysis` | save and list Elliott Wave analyses under `data/wave-analyses/` |
 
 ### JSON feed example
 
@@ -62,11 +64,13 @@ Rows are matched to existing records by **subject + date**; matches update (fill
 
 ## Other modules in this app
 
-Two trading modules live alongside the recommendations admin. Both are **paper
-trading only** — no broker is connected and no real order can be placed.
+Three trading modules live alongside the recommendations admin. None of them can
+place an order — the trading pads are simulated by construction, and Wave Lab is
+read-only analysis.
 
 | Route | Module | Docs |
 |-------|--------|------|
+| `/wave-lab` | Wave Lab — two chart terminals with the full Elliott Wave toolset, Fibonacci/Lucas rule checking, Bollinger Bands and EMAs, fed from Zerodha and exportable to Claude | [WAVE_LAB.md](WAVE_LAB.md) |
 | `/paper-trading` | Historical bar-by-bar replay with a Supabase-backed ledger | [PAPER_TRADING.md](PAPER_TRADING.md) |
 | `/scalper` | Scalper Window — single-screen NIFTY/BANKNIFTY options scalping pad, mock feed, no sign-in | [SCALPER_WINDOW.md](SCALPER_WINDOW.md) |
 

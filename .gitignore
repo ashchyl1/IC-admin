@@ -19,3 +19,7 @@ prisma/*.db-journal
 # uploads
 public/uploads/*
 !public/uploads/.gitkeep
+
+# saved wave analyses -- working files, not source
+data/wave-analyses/*
+!data/wave-analyses/.gitkeep
