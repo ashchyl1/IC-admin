@@ -346,10 +346,31 @@ count was right *and* whether it was traded well.
 
 ### Connecting to Zerodha MCP
 
-The header's connection badge reports the live state and runs the sign-in. Kite
-MCP binds an authorised Kite session to the MCP session id, so connecting is a
-browser round trip: the provider calls the endpoint's `login` tool, you open the
-URL it returns, sign in, and come back.
+**Connecting is two stages, and the badge in the header shows which one you are
+on.** There is no sign-in button until an endpoint is configured, because until
+then there is nothing to sign in to.
+
+| Badge | Meaning | Next step |
+|---|---|---|
+| **Connect data** (amber) | No broker configured; charts are simulated | Open it — the panel lists the two env lines to add |
+| **Sign in to Kite** (amber) | Endpoint configured, session not authorised | Click it; a Kite tab opens, then choose Reload data |
+| **Zerodha** (green) | Authorised and serving data | Nothing |
+| **Data status** (red) | The status check itself failed | Open it for the error |
+
+Stage one is `.env` plus a restart:
+
+```bash
+MARKET_PROVIDER=kite-mcp
+KITE_MCP_URL=https://mcp.kite.trade/mcp   # or your own bridge
+```
+
+Env vars are read once at boot, so the dev server has to be restarted — a
+running one will keep reporting "Connect data" no matter what you put in the
+file.
+
+Stage two is the sign-in. Kite MCP binds an authorised Kite session to the MCP
+session id, so connecting is a browser round trip: the provider calls the
+endpoint's `login` tool, you open the URL it returns, sign in, and come back.
 
 Because the session lives on the provider instance, providers are **cached per
 endpoint** — a fresh one per request would sign in on one session and then query
