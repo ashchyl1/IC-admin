@@ -17,14 +17,19 @@ import {
   type TerminalConfig,
   type TerminalId,
 } from "@/lib/wave-lab/workspace-store";
-import { PriceChart, type ChartBridge, type HoverReadout } from "./PriceChart";
+import { bollinger, defined, ema } from "@/lib/wave-lab/indicators";
+import { useIndicators } from "@/lib/wave-lab/indicator-store";
+import { PriceChart, type ChartBridge, type HoverReadout, type OverlayLine } from "./PriceChart";
 import { AnalysisPanel } from "./AnalysisPanel";
+import { BandFill } from "./BandFill";
+import { IndicatorSettings } from "./IndicatorSettings";
 import { DrawingOverlay } from "./DrawingOverlay";
 import { DrawingToolbar } from "./DrawingToolbar";
 import { SymbolSearch } from "./SymbolSearch";
 
 const STYLES: { value: SeriesStyle; label: string }[] = [
   { value: "candles", label: "Candles" },
+  { value: "bars", label: "OHLC bars" },
   { value: "heikin-ashi", label: "Heikin-Ashi" },
   { value: "line", label: "Line" },
   { value: "area", label: "Area" },
@@ -64,6 +69,45 @@ export function Terminal({ id, dark }: { id: TerminalId; dark: boolean }) {
   const [hover, setHover] = React.useState<HoverReadout | null>(null);
   const [bridge, setBridge] = React.useState<ChartBridge | null>(null);
   const [showAnalysis, setShowAnalysis] = React.useState(true);
+  const indicators = useIndicators((s) => s.byTerminal[id]);
+
+  /**
+   * Indicator lines for the price pane.
+   *
+   * Bollinger's three edges are lines like any other; only its *shaded* band
+   * is SVG, because an area series would fill to the baseline and flood the
+   * pane (§12.3).
+   */
+  const bands = React.useMemo(
+    () =>
+      indicators?.bollinger.visible
+        ? bollinger(state.candles, indicators.bollinger.length, indicators.bollinger.deviations)
+        : null,
+    [state.candles, indicators?.bollinger.visible, indicators?.bollinger.length, indicators?.bollinger.deviations]
+  );
+
+  const lines = React.useMemo<OverlayLine[]>(() => {
+    if (!indicators) return [];
+    const out: OverlayLine[] = [];
+    for (const e of indicators.emas) {
+      if (!e.visible) continue;
+      out.push({
+        id: e.id,
+        color: e.color,
+        width: e.width,
+        data: defined(ema(state.candles, e.period)),
+      });
+    }
+    if (bands) {
+      const { color, width } = indicators.bollinger;
+      out.push(
+        { id: "bb-upper", color, width, data: defined(bands.upper) },
+        { id: "bb-middle", color, width, data: defined(bands.middle) },
+        { id: "bb-lower", color, width, data: defined(bands.lower) }
+      );
+    }
+    return out;
+  }, [indicators, bands, state.candles]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -158,6 +202,8 @@ export function Terminal({ id, dark }: { id: TerminalId; dark: boolean }) {
           VOL
         </Toggle>
 
+        <IndicatorSettings terminal={id} />
+
         <Toggle
           on={showAnalysis}
           onClick={() => setShowAnalysis((v) => !v)}
@@ -201,6 +247,7 @@ export function Terminal({ id, dark }: { id: TerminalId; dark: boolean }) {
           <>
             <PriceChart
               candles={state.candles}
+              lines={lines}
               style={config.style}
               logScale={config.logScale}
               showVolume={config.showVolume}
@@ -208,6 +255,16 @@ export function Terminal({ id, dark }: { id: TerminalId; dark: boolean }) {
               onHover={setHover}
               onBridge={setBridge}
             />
+            {/* Between chart and drawings: the band sits behind wave labels. */}
+            {bands && indicators?.bollinger.fill && (
+              <BandFill
+                upper={bands.upper}
+                lower={bands.lower}
+                bridge={bridge}
+                colour={indicators.bollinger.color}
+                opacity={indicators.bollinger.fillOpacity}
+              />
+            )}
             {/* Sits above the canvas; see DrawingOverlay for why it owns the
                 pointer handling rather than the chart doing it. */}
             <DrawingOverlay

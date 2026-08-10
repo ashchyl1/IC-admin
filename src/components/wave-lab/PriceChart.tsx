@@ -13,6 +13,7 @@
 import * as React from "react";
 import {
   AreaSeries,
+  BarSeries,
   CandlestickSeries,
   CrosshairMode,
   HistogramSeries,
@@ -74,8 +75,18 @@ export interface ChartBridge {
   setInteractive(enabled: boolean): void;
 }
 
+/** An indicator line drawn on the price pane (EMA, Bollinger edge). */
+export interface OverlayLine {
+  id: string;
+  color: string;
+  width: number;
+  data: { time: number; value: number }[];
+}
+
 interface Props {
   candles: MarketCandle[];
+  /** EMAs and Bollinger lines. Bollinger's *fill* is SVG — see §12.3. */
+  lines?: OverlayLine[];
   style: SeriesStyle;
   logScale: boolean;
   showVolume: boolean;
@@ -85,8 +96,11 @@ interface Props {
   onBridge?: (bridge: ChartBridge | null) => void;
 }
 
+const NO_LINES: OverlayLine[] = [];
+
 export function PriceChart({
   candles,
+  lines = NO_LINES,
   style,
   logScale,
   showVolume,
@@ -96,8 +110,10 @@ export function PriceChart({
 }: Props) {
   const hostRef = React.useRef<HTMLDivElement>(null);
   const chartRef = React.useRef<IChartApi | null>(null);
-  const priceRef = React.useRef<ISeriesApi<"Candlestick" | "Line" | "Area"> | null>(null);
+  const priceRef = React.useRef<ISeriesApi<"Candlestick" | "Line" | "Area" | "Bar"> | null>(null);
   const volumeRef = React.useRef<ISeriesApi<"Histogram"> | null>(null);
+  /** Indicator lines, keyed by config id so only what changed is rebuilt. */
+  const lineRefs = React.useRef(new Map<string, ISeriesApi<"Line">>());
   /** Overlay listeners, notified whenever the projection changes. */
   const bridgeListeners = React.useRef(new Set<() => void>());
 
@@ -226,6 +242,15 @@ export function PriceChart({
               bottomColor: "rgba(56,126,209,0.02)",
               lineWidth: 2,
             })
+          : style === "bars"
+            ? // OHLC bars: open tick left, close tick right, coloured by
+              // direction. `thinBars: false` keeps the ticks legible when the
+              // chart is zoomed out.
+              chart.addSeries(BarSeries, {
+                upColor: KITE.up,
+                downColor: KITE.down,
+                thinBars: false,
+              })
           : chart.addSeries(CandlestickSeries, {
               upColor: KITE.up,
               downColor: KITE.down,
@@ -277,6 +302,46 @@ export function PriceChart({
 
     if (source.length) chartRef.current?.timeScale().fitContent();
   }, [candles, style, showVolume]);
+
+  // --------------------------------------------------- indicator lines ----
+  React.useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const live = lineRefs.current;
+
+    // Drop series whose config has gone (indicator hidden or removed).
+    for (const [id, series] of live) {
+      if (!lines.some((l) => l.id === id)) {
+        chart.removeSeries(series);
+        live.delete(id);
+      }
+    }
+
+    for (const line of lines) {
+      let series = live.get(line.id);
+      if (!series) {
+        series = chart.addSeries(LineSeries, {
+          color: line.color,
+          lineWidth: line.width as 1 | 2 | 3 | 4,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+        });
+        live.set(line.id, series);
+      } else {
+        series.applyOptions({ color: line.color, lineWidth: line.width as 1 | 2 | 3 | 4 });
+      }
+      series.setData(line.data.map((p) => ({ time: p.time as UTCTimestamp, value: p.value })));
+    }
+  }, [lines, style, showVolume, dark, logScale]);
+
+  // The chart is torn down whenever dark/logScale change, taking its series
+  // with it — so the registry has to be emptied or the next pass tries to
+  // reuse handles belonging to a destroyed chart.
+  React.useEffect(() => {
+    const live = lineRefs.current;
+    return () => live.clear();
+  }, [dark, logScale]);
 
   // -------------------------------------------------------------- hover ----
   React.useEffect(() => {

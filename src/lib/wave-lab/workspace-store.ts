@@ -13,7 +13,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Interval } from "./types";
 
-export type SeriesStyle = "candles" | "heikin-ashi" | "line" | "area";
+export type SeriesStyle = "candles" | "bars" | "heikin-ashi" | "line" | "area";
 export type TerminalId = "A" | "B";
 
 export interface TerminalConfig {

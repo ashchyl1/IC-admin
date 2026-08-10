@@ -60,9 +60,14 @@ export function DrawingOverlay({ terminal, bridge, dark, candles }: Props) {
   const beginDrag = useDrawings((s) => s.beginDrag);
   const movePivot = useDrawings((s) => s.movePivot);
 
-  // Re-render whenever the chart's projection moves. A counter is enough —
-  // the actual coordinates are recomputed from the bridge during render.
-  const [, bump] = React.useReducer((n: number) => n + 1, 0);
+  // Re-render whenever the chart's projection moves.
+  //
+  // `tick` is fed into the projection memos below, not just used to force a
+  // render. The bridge exists before its converters work — they need the price
+  // series — so a first pass can project nothing, and a memo keyed only on
+  // [drawings, bridge] would stay frozen at that empty result. On a reload
+  // with saved drawings that means the count never appears.
+  const [tick, bump] = React.useReducer((n: number) => n + 1, 0);
   React.useEffect(() => bridge?.subscribe(bump), [bridge]);
 
   const hostRef = React.useRef<HTMLDivElement>(null);
@@ -92,7 +97,8 @@ export function DrawingOverlay({ terminal, bridge, dark, candles }: Props) {
 
   const screenDrawings = React.useMemo(
     () => drawings.map(project).filter((s): s is ScreenDrawing => s !== null),
-    [drawings, project]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [drawings, project, tick]
   );
 
   // ------------------------------------------------------------- pointer ---
@@ -203,7 +209,8 @@ export function DrawingOverlay({ terminal, bridge, dark, candles }: Props) {
     if (!result?.invalidation) return null;
     const at = bridge.toScreen({ time: selected.pivots[0].time, price: result.invalidation.price });
     return at ? { y: at.y, price: result.invalidation.price } : null;
-  }, [selected, candles, bridge]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, candles, bridge, tick]);
 
   return (
     <div
