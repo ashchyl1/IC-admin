@@ -16,6 +16,7 @@ import { analyse, type Analysis, type RuleResult } from "@/lib/wave-lab/analysis
 import { useDrawings } from "@/lib/wave-lab/drawings/store";
 import { TOOL_SPECS } from "@/lib/wave-lab/drawings/tools";
 import { DEGREE_META } from "@/lib/wave-lab/drawings/degrees";
+import { DrawingsList } from "./DrawingsList";
 import type { MarketCandle } from "@/lib/wave-lab/types";
 import type { TerminalId } from "@/lib/wave-lab/workspace-store";
 
@@ -64,6 +65,10 @@ export function AnalysisPanel({
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
+        {/* Above the verdict: it is also the only route back to a locked or
+            hidden drawing, so it must not be behind a selection. */}
+        <DrawingsList terminal={terminal} candles={candles} />
+
         {!selected && (
           <p className="p-3 text-[12px] leading-relaxed text-[var(--wl-muted)]">
             Select a completed impulse, correction or triangle to see its verdict, the rules it

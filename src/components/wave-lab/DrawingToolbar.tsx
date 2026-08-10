@@ -11,10 +11,35 @@
  */
 
 import * as React from "react";
-import { Minus, MousePointer2, Redo2, Slash, Trash2, Undo2 } from "lucide-react";
+import {
+  Eye,
+  EyeOff,
+  Lock,
+  Magnet,
+  Minus,
+  MousePointer2,
+  MoveHorizontal,
+  Redo2,
+  Slash,
+  Trash2,
+  Triangle,
+  Undo2,
+  Unlock,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DEGREES, DEGREE_META, type Degree } from "@/lib/wave-lab/drawings/degrees";
-import { TOOL_SPECS, type ToolKind, type Variant } from "@/lib/wave-lab/drawings/tools";
+import {
+  DEFAULT_STYLE,
+  TOOL_SPECS,
+  isChannel,
+  type ToolKind,
+  type Variant,
+} from "@/lib/wave-lab/drawings/tools";
+import {
+  DERIVED_CHANNELS,
+  DERIVED_LABEL,
+  canDerive,
+} from "@/lib/wave-lab/drawings/channels";
 import { useDrawings } from "@/lib/wave-lab/drawings/store";
 import type { TerminalId } from "@/lib/wave-lab/workspace-store";
 
@@ -35,6 +60,8 @@ const TOOL_GLYPH: Record<ToolKind, string> = {
   "triple-combo": "WXYXZ",
   trendline: "",
   horizontal: "",
+  "parallel-channel": "",
+  "triangle-channel": "",
 };
 
 const VARIANT_LABEL: Record<string, string> = {
@@ -63,10 +90,15 @@ export function DrawingToolbar({ terminal }: { terminal: TerminalId }) {
   const past = useDrawings((s) => s.byTerminal[terminal]?.past.length ?? 0);
   const future = useDrawings((s) => s.byTerminal[terminal]?.future.length ?? 0);
 
+  const magnet = useDrawings((s) => s.magnet);
+  const setMagnet = useDrawings((s) => s.setMagnet);
   const setActiveTool = useDrawings((s) => s.setActiveTool);
   const setActiveDegree = useDrawings((s) => s.setActiveDegree);
   const setDegree = useDrawings((s) => s.setDegree);
   const setVariant = useDrawings((s) => s.setVariant);
+  const setStyle = useDrawings((s) => s.setStyle);
+  const toggleFlag = useDrawings((s) => s.toggleFlag);
+  const addDerivedChannel = useDrawings((s) => s.addDerivedChannel);
   const remove = useDrawings((s) => s.remove);
   const undo = useDrawings((s) => s.undo);
   const redo = useDrawings((s) => s.redo);
@@ -122,7 +154,50 @@ export function DrawingToolbar({ terminal }: { terminal: TerminalId }) {
         <Minus className="h-3.5 w-3.5" />
       </IconButton>
 
+      {/* Channels. The parallel tool is also the "custom three-point"
+          channel — two clicks set the base, the third places the parallel. */}
+      <IconButton
+        on={activeTool === "parallel-channel"}
+        onClick={() =>
+          setActiveTool(activeTool === "parallel-channel" ? null : "parallel-channel")
+        }
+        title="Parallel channel — 3 clicks (custom three-point)"
+      >
+        <MoveHorizontal className="h-3.5 w-3.5" />
+      </IconButton>
+      <IconButton
+        on={activeTool === "triangle-channel"}
+        onClick={() =>
+          setActiveTool(activeTool === "triangle-channel" ? null : "triangle-channel")
+        }
+        title="Triangle channel — 4 clicks: A–C then B–D"
+      >
+        <Triangle className="h-3.5 w-3.5" />
+      </IconButton>
+
+      <IconButton
+        on={magnet}
+        onClick={() => setMagnet(!magnet)}
+        title="Magnetic snapping to candle highs and lows"
+      >
+        <Magnet className="h-3.5 w-3.5" />
+      </IconButton>
+
       <span className="mx-0.5 h-4 w-px bg-[var(--wl-border)]" />
+
+      {/* One-click channels derived from the selected count. Each is only
+          offered when the selection can actually produce it. */}
+      {DERIVED_CHANNELS.filter((k) => canDerive(selected, k)).map((kind) => (
+        <button
+          key={kind}
+          type="button"
+          onClick={() => selected && addDerivedChannel(terminal, selected.id, kind)}
+          title={`Draw the ${DERIVED_LABEL[kind]} from this count`}
+          className="rounded-[3px] border border-[var(--wl-blue)] bg-[var(--wl-blue)]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--wl-blue)] transition-colors hover:bg-[var(--wl-blue)]/20"
+        >
+          {DERIVED_LABEL[kind]}
+        </button>
+      ))}
 
       {/* Degree for the NEXT drawing, or for the selected one if there is one. */}
       <select
@@ -157,6 +232,88 @@ export function DrawingToolbar({ terminal }: { terminal: TerminalId }) {
             </option>
           ))}
         </select>
+      )}
+
+      {/* -------- appearance and state of the selected drawing --------- */}
+      {selected && (
+        <>
+          <span className="mx-0.5 h-4 w-px bg-[var(--wl-border)]" />
+
+          <input
+            type="color"
+            value={selected.style?.color ?? DEFAULT_STYLE.color}
+            onChange={(e) => setStyle(terminal, selected.id, { color: e.target.value })}
+            aria-label="Drawing colour"
+            title="Colour"
+            className="h-5 w-6 cursor-pointer rounded-[3px] border border-[var(--wl-border)] bg-transparent p-0"
+          />
+          <select
+            value={selected.style?.lineStyle ?? DEFAULT_STYLE.lineStyle}
+            onChange={(e) =>
+              setStyle(terminal, selected.id, {
+                lineStyle: e.target.value as "solid" | "dashed" | "dotted",
+              })
+            }
+            aria-label="Line style"
+            className="rounded-[3px] border border-[var(--wl-border)] bg-transparent px-1 py-0.5 text-[10px] text-[var(--wl-text)]"
+          >
+            <option value="solid">Solid</option>
+            <option value="dashed">Dashed</option>
+            <option value="dotted">Dotted</option>
+          </select>
+          <select
+            value={selected.style?.thickness ?? DEFAULT_STYLE.thickness}
+            onChange={(e) =>
+              setStyle(terminal, selected.id, { thickness: Number(e.target.value) })
+            }
+            aria-label="Line thickness"
+            className="rounded-[3px] border border-[var(--wl-border)] bg-transparent px-1 py-0.5 text-[10px] text-[var(--wl-text)]"
+          >
+            {[1, 1.5, 2, 3].map((t) => (
+              <option key={t} value={t}>
+                {t}px
+              </option>
+            ))}
+          </select>
+
+          {isChannel(selected.kind) && (
+            <>
+              <IconButton
+                on={selected.style?.fill ?? DEFAULT_STYLE.fill}
+                onClick={() =>
+                  setStyle(terminal, selected.id, {
+                    fill: !(selected.style?.fill ?? DEFAULT_STYLE.fill),
+                  })
+                }
+                title="Background fill"
+              >
+                <span className="text-[9px] font-bold">FILL</span>
+              </IconButton>
+              <IconButton
+                on={!!selected.extend}
+                onClick={() => toggleFlag(terminal, selected.id, "extend")}
+                title="Extend the channel to the pane edges"
+              >
+                <span className="text-[9px] font-bold">EXT</span>
+              </IconButton>
+            </>
+          )}
+
+          <IconButton
+            on={!!selected.locked}
+            onClick={() => toggleFlag(terminal, selected.id, "locked")}
+            title={selected.locked ? "Unlock" : "Lock — stops it being selected or dragged"}
+          >
+            {selected.locked ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
+          </IconButton>
+          <IconButton
+            on={!!selected.hidden}
+            onClick={() => toggleFlag(terminal, selected.id, "hidden")}
+            title={selected.hidden ? "Show" : "Hide"}
+          >
+            {selected.hidden ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+          </IconButton>
+        </>
       )}
 
       <span className="mx-0.5 h-4 w-px bg-[var(--wl-border)]" />

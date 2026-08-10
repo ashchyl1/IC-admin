@@ -17,6 +17,8 @@ export const TOOL_KINDS = [
   "triple-combo",
   "trendline",
   "horizontal",
+  "parallel-channel",
+  "triangle-channel",
 ] as const;
 
 export type ToolKind = (typeof TOOL_KINDS)[number];
@@ -125,7 +127,57 @@ export const TOOL_SPECS: Record<ToolKind, ToolSpec> = {
     defaultVariant: "none",
     hasDegree: false,
   },
+  // Two clicks set the base line, the third places the parallel. This single
+  // tool is both the plain "parallel channel" and the "custom three-point
+  // channel" — they are the same construction.
+  "parallel-channel": {
+    kind: "parallel-channel",
+    label: "Parallel channel",
+    points: 3,
+    labels: [],
+    variants: [],
+    defaultVariant: "none",
+    hasDegree: false,
+  },
+  // Four clicks: A–C, then B–D. Converging, not parallel.
+  "triangle-channel": {
+    kind: "triangle-channel",
+    label: "Triangle channel",
+    points: 4,
+    labels: [],
+    variants: [],
+    defaultVariant: "none",
+    hasDegree: false,
+  },
 };
+
+/** Per-drawing appearance. All optional, so older saved drawings still load. */
+export interface DrawingStyle {
+  color?: string;
+  lineStyle?: "solid" | "dashed" | "dotted";
+  thickness?: number;
+  fill?: boolean;
+  fillOpacity?: number;
+}
+
+export const DEFAULT_STYLE: Required<DrawingStyle> = {
+  color: "#387ed1",
+  lineStyle: "solid",
+  thickness: 1.5,
+  fill: true,
+  fillOpacity: 0.07,
+};
+
+/** SVG dash pattern for a line style. Empty string means solid. */
+export function dashArray(style: DrawingStyle["lineStyle"], thickness = 1.5): string | undefined {
+  if (style === "dashed") return `${thickness * 4} ${thickness * 3}`;
+  if (style === "dotted") return `${thickness} ${thickness * 2.5}`;
+  return undefined;
+}
+
+export function isChannel(kind: ToolKind): boolean {
+  return kind === "parallel-channel" || kind === "triangle-channel";
+}
 
 /** A point in chart space: chart time on x, price on y. */
 export interface Pivot {
@@ -141,6 +193,13 @@ export interface Drawing {
   pivots: Pivot[];
   /** False while still being placed. */
   complete: boolean;
+  style?: DrawingStyle;
+  /** Locked drawings render normally but refuse selection and dragging. */
+  locked?: boolean;
+  /** Hidden drawings are kept but not drawn, and cannot be hit. */
+  hidden?: boolean;
+  /** Channels only: run the lines out to the pane edges. */
+  extend?: boolean;
 }
 
 /** Does this variant permit wave 4 to overlap wave 1? Only diagonals do. */

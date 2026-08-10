@@ -269,7 +269,14 @@ export function PriceChart({
       chart.priceScale("volume").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
       volumeRef.current = vol;
     }
-  }, [style, showVolume]);
+    // `dark` and `logScale` are here because the chart effect above rebuilds
+    // the whole chart when either changes, taking its series with it. Without
+    // them this effect does not re-run, so the new chart ends up with no
+    // series at all and priceRef points at a destroyed one — the chart goes
+    // blank and every overlay stops projecting. Effects run in declaration
+    // order within a commit, so the new chart already exists by the time this
+    // runs.
+  }, [style, showVolume, dark, logScale]);
 
   // --------------------------------------------------------------- data ----
   React.useEffect(() => {
@@ -301,7 +308,8 @@ export function PriceChart({
     );
 
     if (source.length) chartRef.current?.timeScale().fitContent();
-  }, [candles, style, showVolume]);
+    // Same reason as the series effect: a rebuilt chart needs its data back.
+  }, [candles, style, showVolume, dark, logScale]);
 
   // --------------------------------------------------- indicator lines ----
   React.useEffect(() => {

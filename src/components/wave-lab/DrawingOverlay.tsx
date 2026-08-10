@@ -25,7 +25,17 @@ import {
   type ScreenDrawing,
   type ScreenPoint,
 } from "@/lib/wave-lab/drawings/hit-test";
-import { TOOL_SPECS, labelForPivot, type Drawing } from "@/lib/wave-lab/drawings/tools";
+import {
+  DEFAULT_STYLE,
+  TOOL_SPECS,
+  dashArray,
+  isChannel,
+  labelForPivot,
+  type Drawing,
+} from "@/lib/wave-lab/drawings/tools";
+import { channelGeometry, extendToEdges } from "@/lib/wave-lab/drawings/channels";
+import { snapToExtreme } from "@/lib/wave-lab/drawings/snap";
+import type { Pivot } from "@/lib/wave-lab/drawings/tools";
 import { useDrawings } from "@/lib/wave-lab/drawings/store";
 import { analyse } from "@/lib/wave-lab/analysis/rules";
 import type { MarketCandle } from "@/lib/wave-lab/types";
@@ -56,6 +66,7 @@ export function DrawingOverlay({ terminal, bridge, dark, candles }: Props) {
   const pending = useDrawings((s) => s.pending);
   const selectedId = useDrawings((s) => s.selectedId);
   const addPivot = useDrawings((s) => s.addPivot);
+  const magnet = useDrawings((s) => s.magnet);
   const select = useDrawings((s) => s.select);
   const beginDrag = useDrawings((s) => s.beginDrag);
   const movePivot = useDrawings((s) => s.movePivot);
@@ -95,8 +106,16 @@ export function DrawingOverlay({ terminal, bridge, dark, candles }: Props) {
     [bridge]
   );
 
+  // Hidden and locked drawings are excluded from hit-testing entirely: hidden
+  // ones are not on screen to aim at, and a locked one must not be grabbed —
+  // that is the whole point of locking a reference channel you keep clicking
+  // near.
   const screenDrawings = React.useMemo(
-    () => drawings.map(project).filter((s): s is ScreenDrawing => s !== null),
+    () =>
+      drawings
+        .filter((d) => !d.hidden && !d.locked)
+        .map(project)
+        .filter((s): s is ScreenDrawing => s !== null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [drawings, project, tick]
   );
@@ -137,7 +156,10 @@ export function DrawingOverlay({ terminal, bridge, dark, candles }: Props) {
 
       if (drag) {
         const chartPoint = bridge.toChart(point);
-        if (chartPoint) movePivot(terminal, drag.drawingId, drag.pointIndex, chartPoint);
+        if (chartPoint) {
+          const placed = magnet ? snapToExtreme(chartPoint, candles, bridge).pivot : chartPoint;
+          movePivot(terminal, drag.drawingId, drag.pointIndex, placed);
+        }
         return;
       }
       if (activeTool) return;
@@ -163,7 +185,11 @@ export function DrawingOverlay({ terminal, bridge, dark, candles }: Props) {
 
       if (activeTool) {
         const chartPoint = bridge.toChart(point);
-        if (chartPoint) addPivot(terminal, chartPoint);
+        if (chartPoint) {
+          // Snap on placement too, not only on drag — a pivot placed three
+          // ticks off the real high poisons every ratio computed from it.
+          addPivot(terminal, magnet ? snapToExtreme(chartPoint, candles, bridge).pivot : chartPoint);
+        }
         return;
       }
 
@@ -179,7 +205,18 @@ export function DrawingOverlay({ terminal, bridge, dark, candles }: Props) {
       host.removeEventListener("pointermove", onMove);
       host.removeEventListener("pointerup", onUp);
     };
-  }, [bridge, activeTool, screenDrawings, terminal, addPivot, select, beginDrag, movePivot]);
+  }, [
+    bridge,
+    activeTool,
+    screenDrawings,
+    terminal,
+    addPivot,
+    select,
+    beginDrag,
+    movePivot,
+    magnet,
+    candles,
+  ]);
 
   // Escape abandons a half-placed structure rather than stranding it.
   const cancelPending = useDrawings((s) => s.cancelPending);
@@ -259,16 +296,28 @@ export function DrawingOverlay({ terminal, bridge, dark, candles }: Props) {
           </g>
         )}
 
-        {drawings.map((d) => (
-          <DrawnStructure
-            key={d.id}
-            drawing={d}
-            bridge={bridge}
-            selected={d.id === selectedId}
-            labelColour={labelColour}
-            paneWidth={size.width}
-          />
-        ))}
+        {drawings
+          .filter((d) => !d.hidden)
+          .map((d) =>
+            isChannel(d.kind) ? (
+              <DrawnChannel
+                key={d.id}
+                drawing={d}
+                bridge={bridge}
+                selected={d.id === selectedId}
+                paneWidth={size.width}
+              />
+            ) : (
+              <DrawnStructure
+                key={d.id}
+                drawing={d}
+                bridge={bridge}
+                selected={d.id === selectedId}
+                labelColour={labelColour}
+                paneWidth={size.width}
+              />
+            )
+          )}
 
         {/* The structure currently being placed, in grey until committed. */}
         {activeTool && pendingPivots.length > 0 && bridge && (
@@ -363,6 +412,89 @@ function DrawnStructure({
           </g>
         );
       })}
+    </g>
+  );
+}
+
+/**
+ * A channel: two lines and the fill between them.
+ *
+ * The fill is a quadrilateral joining the two segments' endpoints, which works
+ * for both geometries — parallel and converging alike — because it never
+ * assumes the lines stay the same distance apart.
+ */
+function DrawnChannel({
+  drawing,
+  bridge,
+  selected,
+  paneWidth,
+}: {
+  drawing: Drawing;
+  bridge: ChartBridge | null;
+  selected: boolean;
+  paneWidth: number;
+}) {
+  if (!bridge) return null;
+  const geometry = channelGeometry(drawing);
+  if (!geometry) return null;
+
+  const s = { ...DEFAULT_STYLE, ...drawing.style };
+  const stroke = selected ? COLOUR.selected : s.color;
+  const dash = dashArray(s.lineStyle, s.thickness);
+
+  const toSeg = (seg: { from: Pivot; to: Pivot }) => {
+    const a = bridge.toScreen(seg.from);
+    const b = bridge.toScreen(seg.to);
+    if (!a || !b) return null;
+    const raw = { x1: a.x, y1: a.y, x2: b.x, y2: b.y };
+    return drawing.extend ? extendToEdges(raw, paneWidth) : raw;
+  };
+
+  const one = toSeg(geometry.primary);
+  const two = toSeg(geometry.secondary);
+  if (!one || !two) return null;
+
+  return (
+    <g data-testid="channel" opacity={drawing.locked ? 0.75 : 1}>
+      {s.fill && (
+        <polygon
+          points={`${one.x1},${one.y1} ${one.x2},${one.y2} ${two.x2},${two.y2} ${two.x1},${two.y1}`}
+          fill={s.color}
+          fillOpacity={s.fillOpacity}
+          stroke="none"
+        />
+      )}
+      {[one, two].map((seg, i) => (
+        <line
+          key={i}
+          x1={seg.x1}
+          y1={seg.y1}
+          x2={seg.x2}
+          y2={seg.y2}
+          stroke={stroke}
+          strokeWidth={selected ? s.thickness + 0.75 : s.thickness}
+          strokeDasharray={dash}
+        />
+      ))}
+
+      {/* Handles stay on the real pivots even when the lines are extended,
+          because that is what a drag has to move. */}
+      {!drawing.locked &&
+        drawing.pivots.map((p, i) => {
+          const at = bridge.toScreen(p);
+          if (!at) return null;
+          return (
+            <circle
+              key={i}
+              cx={at.x}
+              cy={at.y}
+              r={selected ? 4.5 : 3.5}
+              fill={COLOUR.handle}
+              stroke={stroke}
+              strokeWidth={1.5}
+            />
+          );
+        })}
     </g>
   );
 }

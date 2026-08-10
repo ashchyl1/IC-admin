@@ -12,7 +12,15 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { TOOL_SPECS, type Drawing, type Pivot, type ToolKind, type Variant } from "./tools";
+import {
+  TOOL_SPECS,
+  type Drawing,
+  type DrawingStyle,
+  type Pivot,
+  type ToolKind,
+  type Variant,
+} from "./tools";
+import { deriveChannel, type DerivedChannelKind } from "./channels";
 import type { Degree } from "./degrees";
 import type { TerminalId } from "../workspace-store";
 
@@ -36,6 +44,9 @@ interface DrawingState {
   /** In-progress placement: pivots collected so far. */
   pending: { terminal: TerminalId; kind: ToolKind; pivots: Pivot[] } | null;
   selectedId: string | null;
+  /** Magnetic snapping to candle highs and lows. */
+  magnet: boolean;
+  setMagnet: (on: boolean) => void;
 
   setActiveTool: (kind: ToolKind | null) => void;
   setActiveDegree: (degree: Degree) => void;
@@ -51,6 +62,10 @@ interface DrawingState {
   remove: (terminal: TerminalId, id: string) => void;
   setDegree: (terminal: TerminalId, id: string, degree: Degree) => void;
   setVariant: (terminal: TerminalId, id: string, variant: Variant) => void;
+  setStyle: (terminal: TerminalId, id: string, style: DrawingStyle) => void;
+  toggleFlag: (terminal: TerminalId, id: string, flag: "locked" | "hidden" | "extend") => void;
+  /** Build a channel from the selected count and select the result. */
+  addDerivedChannel: (terminal: TerminalId, sourceId: string, kind: DerivedChannelKind) => void;
   clear: (terminal: TerminalId) => void;
 
   undo: (terminal: TerminalId) => void;
@@ -98,6 +113,11 @@ export const useDrawings = create<DrawingState>()(
         activeDegree: "minor",
         pending: null,
         selectedId: null,
+        // On by default: Elliott pivots are actual extremes, so the honest
+        // placement should be the effortless one.
+        magnet: true,
+
+        setMagnet: (magnet) => set({ magnet }),
 
         setActiveTool: (kind) =>
           set({ activeTool: kind, pending: null, selectedId: kind ? null : get().selectedId }),
@@ -162,6 +182,23 @@ export const useDrawings = create<DrawingState>()(
         setVariant: (terminal, id, variant) =>
           commit(terminal, (ds) => ds.map((d) => (d.id === id ? { ...d, variant } : d))),
 
+        setStyle: (terminal, id, style) =>
+          commit(terminal, (ds) =>
+            ds.map((d) => (d.id === id ? { ...d, style: { ...d.style, ...style } } : d))
+          ),
+
+        toggleFlag: (terminal, id, flag) =>
+          commit(terminal, (ds) => ds.map((d) => (d.id === id ? { ...d, [flag]: !d[flag] } : d))),
+
+        addDerivedChannel: (terminal, sourceId, kind) => {
+          const source = get().byTerminal[terminal]?.drawings.find((d) => d.id === sourceId);
+          if (!source) return;
+          const channel = deriveChannel(source, kind, nextId());
+          if (!channel) return;
+          commit(terminal, (ds) => [...ds, channel]);
+          set({ selectedId: channel.id });
+        },
+
         clear: (terminal) => commit(terminal, () => []),
 
         undo: (terminal) =>
@@ -213,6 +250,7 @@ export const useDrawings = create<DrawingState>()(
           B: { drawings: s.byTerminal.B?.drawings ?? [], past: [], future: [] },
         },
         activeDegree: s.activeDegree,
+        magnet: s.magnet,
       }),
     }
   )
