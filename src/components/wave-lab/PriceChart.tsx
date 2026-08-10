@@ -161,10 +161,25 @@ export function PriceChart({
       toChart({ x, y }) {
         const series = priceRef.current;
         if (!series) return null;
-        const time = chart.timeScale().coordinateToTime(x);
         const price = series.coordinateToPrice(y);
-        if (time === null || price === null) return null;
-        return { time: time as number, price };
+        if (price === null) return null;
+
+        const time = chart.timeScale().coordinateToTime(x);
+        if (time !== null) return { time: time as number, price };
+
+        // Past the last bar, coordinateToTime returns null — there is no bar
+        // there to name. Silently returning null makes the click vanish, which
+        // is exactly what happens when someone places wave 5 out toward the
+        // right edge. Extrapolate instead, from the logical index and the
+        // series' own bar spacing.
+        const logical = chart.timeScale().coordinateToLogical(x);
+        const bars = candlesRef.current;
+        if (logical === null || bars.length < 2) return null;
+
+        const spacing = bars[bars.length - 1].time - bars[bars.length - 2].time;
+        const lastIndex = bars.length - 1;
+        const extrapolated = bars[lastIndex].time + (logical - lastIndex) * spacing;
+        return { time: Math.round(extrapolated), price };
       },
       subscribe(listener) {
         bridgeListeners.current.add(listener);

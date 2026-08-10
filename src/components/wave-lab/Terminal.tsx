@@ -18,6 +18,7 @@ import {
   type TerminalId,
 } from "@/lib/wave-lab/workspace-store";
 import { PriceChart, type ChartBridge, type HoverReadout } from "./PriceChart";
+import { AnalysisPanel } from "./AnalysisPanel";
 import { DrawingOverlay } from "./DrawingOverlay";
 import { DrawingToolbar } from "./DrawingToolbar";
 import { SymbolSearch } from "./SymbolSearch";
@@ -62,6 +63,7 @@ export function Terminal({ id, dark }: { id: TerminalId; dark: boolean }) {
   const [state, setState] = React.useState<LoadState>(EMPTY);
   const [hover, setHover] = React.useState<HoverReadout | null>(null);
   const [bridge, setBridge] = React.useState<ChartBridge | null>(null);
+  const [showAnalysis, setShowAnalysis] = React.useState(true);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -156,6 +158,14 @@ export function Terminal({ id, dark }: { id: TerminalId; dark: boolean }) {
           VOL
         </Toggle>
 
+        <Toggle
+          on={showAnalysis}
+          onClick={() => setShowAnalysis((v) => !v)}
+          title="Show the wave-analysis panel"
+        >
+          RULES
+        </Toggle>
+
         <Readout hover={hover} config={config} candles={state.candles} />
       </header>
 
@@ -175,8 +185,9 @@ export function Terminal({ id, dark }: { id: TerminalId; dark: boolean }) {
         </Banner>
       )}
 
-      {/* ---------------------------------------------------------- chart -- */}
-      <div className="relative min-h-0 flex-1">
+      {/* ------------------------------------------------ chart + panel -- */}
+      <div className="flex min-h-0 flex-1">
+      <div className="relative min-h-0 min-w-0 flex-1">
         {state.loading && (
           <div className="absolute inset-0 z-10 grid place-items-center bg-[var(--wl-bg)]/60">
             <Loader2 className="h-5 w-5 animate-spin text-[var(--wl-blue)]" />
@@ -199,8 +210,22 @@ export function Terminal({ id, dark }: { id: TerminalId; dark: boolean }) {
             />
             {/* Sits above the canvas; see DrawingOverlay for why it owns the
                 pointer handling rather than the chart doing it. */}
-            <DrawingOverlay terminal={id} bridge={bridge} dark={dark} />
+            <DrawingOverlay
+              terminal={id}
+              bridge={bridge}
+              dark={dark}
+              candles={state.candles}
+            />
           </>
+        )}
+      </div>
+
+        {showAnalysis && (
+          <AnalysisPanel
+            terminal={id}
+            candles={state.candles}
+            onClose={() => setShowAnalysis(false)}
+          />
         )}
       </div>
     </section>

@@ -27,6 +27,8 @@ import {
 } from "@/lib/wave-lab/drawings/hit-test";
 import { TOOL_SPECS, labelForPivot, type Drawing } from "@/lib/wave-lab/drawings/tools";
 import { useDrawings } from "@/lib/wave-lab/drawings/store";
+import { analyse } from "@/lib/wave-lab/analysis/rules";
+import type { MarketCandle } from "@/lib/wave-lab/types";
 import type { TerminalId } from "@/lib/wave-lab/workspace-store";
 import type { ChartBridge } from "./PriceChart";
 
@@ -37,15 +39,18 @@ const COLOUR = {
   handle: "#ffffff",
   label: "#222222",
   labelDark: "#eaeaea",
+  invalid: "#ff5722",
 } as const;
 
 interface Props {
   terminal: TerminalId;
   bridge: ChartBridge | null;
   dark: boolean;
+  /** Needed for the rule engine's bar counts behind the invalidation line. */
+  candles: MarketCandle[];
 }
 
-export function DrawingOverlay({ terminal, bridge, dark }: Props) {
+export function DrawingOverlay({ terminal, bridge, dark, candles }: Props) {
   const drawings = useDrawings((s) => s.byTerminal[terminal]?.drawings ?? []);
   const activeTool = useDrawings((s) => s.activeTool);
   const pending = useDrawings((s) => s.pending);
@@ -188,6 +193,18 @@ export function DrawingOverlay({ terminal, bridge, dark }: Props) {
   const size = bridge?.size() ?? { width: 0, height: 0 };
   const labelColour = dark ? COLOUR.labelDark : COLOUR.label;
 
+  // The invalidation level for whatever is selected. §5 calls this the most
+  // actionable output the app produces, so it is drawn on the chart rather
+  // than left in a side panel.
+  const selected = drawings.find((d) => d.id === selectedId) ?? null;
+  const invalidation = React.useMemo(() => {
+    if (!selected || !bridge) return null;
+    const result = analyse(selected, candles);
+    if (!result?.invalidation) return null;
+    const at = bridge.toScreen({ time: selected.pivots[0].time, price: result.invalidation.price });
+    return at ? { y: at.y, price: result.invalidation.price } : null;
+  }, [selected, candles, bridge]);
+
   return (
     <div
       ref={hostRef}
@@ -208,6 +225,33 @@ export function DrawingOverlay({ terminal, bridge, dark }: Props) {
         style={{ pointerEvents: "none" }}
         data-testid="wave-lab-overlay"
       >
+        {invalidation && (
+          <g data-testid="invalidation-line">
+            <line
+              x1={0}
+              y1={invalidation.y}
+              x2={size.width}
+              y2={invalidation.y}
+              stroke={COLOUR.invalid}
+              strokeWidth={1}
+              strokeDasharray="6 4"
+            />
+            <rect
+              x={4}
+              y={invalidation.y - 15}
+              width={128}
+              height={14}
+              rx={2}
+              fill={COLOUR.invalid}
+              opacity={0.92}
+            />
+            <text x={8} y={invalidation.y - 4.5} fontSize={10} fontWeight={600} fill="#ffffff">
+              INVALID BELOW{" "}
+              {invalidation.price.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+            </text>
+          </g>
+        )}
+
         {drawings.map((d) => (
           <DrawnStructure
             key={d.id}
