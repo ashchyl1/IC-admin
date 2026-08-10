@@ -12,6 +12,9 @@ build
 # live MCP session token -- credential, never commit
 .kite-mcp-session.json
 
+# Kite Connect access token -- credential, never commit
+.kite-session.json
+
 # database
 prisma/*.db
 prisma/*.db-journal
@@ -19,3 +22,10 @@ prisma/*.db-journal
 # uploads
 public/uploads/*
 !public/uploads/.gitkeep
+
+# saved wave analyses -- working files, not source
+data/wave-analyses/*
+!data/wave-analyses/.gitkeep
+
+# standalone build output -- rebuild with scripts/build-artifact.mjs
+artifact/wave-lab.html

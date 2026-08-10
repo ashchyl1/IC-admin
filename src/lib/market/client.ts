@@ -1,0 +1,151 @@
+/**
+ * The browser's view of market data.
+ *
+ * One indirection with two implementations: the default talks to
+ * `/api/market/*`, and the standalone build swaps in an in-browser generator
+ * because it has no server to talk to. Everything in the workspace goes through
+ * here, so neither the store nor any component knows which it is.
+ */
+
+import type {
+  Instrument,
+  Interval,
+  LoginChallenge,
+  MarketCandle,
+  ProviderDiagnostics,
+  ProviderInfo,
+} from "./types";
+
+export interface CandleQuery {
+  symbol: string;
+  interval: Interval;
+  days: number;
+  instrumentToken?: number;
+}
+
+export interface CandleResult {
+  candles: MarketCandle[];
+  provider: ProviderInfo | null;
+  warning?: string;
+}
+
+export interface QuoteResult {
+  key: string;
+  last: number;
+}
+
+export interface KiteStatus {
+  configured: boolean;
+  redirectUrl: string;
+  signedIn: boolean;
+  userName: string | null;
+  expiresAt: string | null;
+  expired: boolean | null;
+  tokenSource: string | null;
+}
+
+export interface MarketStatus {
+  mode: string;
+  chain: ProviderInfo[];
+  active: ProviderInfo | null;
+  canLogin: boolean;
+  diagnostics: ProviderDiagnostics | null;
+  kite?: KiteStatus;
+  store?: { configured: boolean; label: string };
+}
+
+export interface SyncResult {
+  symbol: string;
+  interval: string;
+  fetched: number;
+  written: number;
+  inserted: number;
+  updated: number;
+  totalAfter: number;
+}
+
+export interface MarketClient {
+  candles(query: CandleQuery): Promise<CandleResult>;
+  quotes(symbols: string[]): Promise<QuoteResult[]>;
+  search(query: string, limit: number): Promise<Instrument[]>;
+  /** Omitted by clients with no server behind them, e.g. the standalone build. */
+  status?(): Promise<MarketStatus>;
+  login?(): Promise<LoginChallenge & { provider: ProviderInfo }>;
+  /** Backfill a range from the broker into the Supabase store. */
+  sync?(symbol: string, interval: Interval, days: number): Promise<SyncResult>;
+}
+
+/** Talks to this app's own route handlers. */
+export const httpMarketClient: MarketClient = {
+  async candles({ symbol, interval, days, instrumentToken }) {
+    const params = new URLSearchParams({ symbol, interval, days: String(days) });
+    if (instrumentToken) params.set("token", String(instrumentToken));
+
+    const response = await fetch(`/api/market/candles?${params.toString()}`);
+    const payload = (await response.json()) as {
+      candles?: MarketCandle[];
+      provider?: ProviderInfo;
+      warning?: string;
+      error?: string;
+    };
+    if (!response.ok) throw new Error(payload.error ?? `HTTP ${response.status}`);
+    return {
+      candles: payload.candles ?? [],
+      provider: payload.provider ?? null,
+      warning: payload.warning,
+    };
+  },
+
+  async quotes(symbols) {
+    if (symbols.length === 0) return [];
+    const response = await fetch(`/api/market/quote?symbols=${encodeURIComponent(symbols.join(","))}`);
+    if (!response.ok) return [];
+    const payload = (await response.json()) as { quotes?: QuoteResult[] };
+    return payload.quotes ?? [];
+  },
+
+  async search(query, limit) {
+    const response = await fetch(`/api/market/search?q=${encodeURIComponent(query)}&limit=${limit}`);
+    const payload = (await response.json()) as { instruments?: Instrument[]; error?: string };
+    if (!response.ok) throw new Error(payload.error ?? `HTTP ${response.status}`);
+    return payload.instruments ?? [];
+  },
+
+  async status() {
+    const response = await fetch("/api/market/status");
+    const payload = (await response.json()) as MarketStatus & { error?: string };
+    if (!response.ok) throw new Error(payload.error ?? `HTTP ${response.status}`);
+    return payload;
+  },
+
+  async sync(symbol, interval, days) {
+    const response = await fetch("/api/market/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ symbol, interval, days }),
+    });
+    const payload = (await response.json()) as SyncResult & { error?: string };
+    if (!response.ok) throw new Error(payload.error ?? `HTTP ${response.status}`);
+    return payload;
+  },
+
+  async login() {
+    const response = await fetch("/api/market/status?login=1");
+    const payload = (await response.json()) as LoginChallenge & {
+      provider: ProviderInfo;
+      error?: string;
+    };
+    if (!response.ok) throw new Error(payload.error ?? `HTTP ${response.status}`);
+    return payload;
+  },
+};
+
+let active: MarketClient = httpMarketClient;
+
+export function setMarketClient(client: MarketClient): void {
+  active = client;
+}
+
+export function getMarketClient(): MarketClient {
+  return active;
+}

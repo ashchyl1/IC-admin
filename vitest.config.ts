@@ -7,6 +7,10 @@ export default defineConfig({
     include: ["tests/**/*.test.ts"],
   },
   resolve: {
-    alias: { "@": path.resolve(__dirname, "src") },
+    alias: {
+      "@": path.resolve(__dirname, "src"),
+      // Supplied by Next at build time; harmless and unresolvable under vitest.
+      "server-only": path.resolve(__dirname, "tests/stubs/server-only.ts"),
+    },
   },
 });
