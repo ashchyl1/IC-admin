@@ -116,6 +116,42 @@ export function aggregateDaily(daily: MarketCandle[], target: "1W" | "1M"): Mark
   return out.sort(byTime);
 }
 
+/**
+ * Heikin-Ashi transform (§3).
+ *
+ * Offered as a view, never as the default: HA smooths away the real high and
+ * low, and Elliott pivots must sit on actual extremes. Anything that reads
+ * prices for a wave count must use the raw series, not this.
+ */
+export function toHeikinAshi(candles: MarketCandle[]): MarketCandle[] {
+  if (!candles.length) return [];
+  const sorted = [...candles].sort(byTime);
+  const out: MarketCandle[] = [];
+
+  let prevOpen = (sorted[0].open + sorted[0].close) / 2;
+  let prevClose = (sorted[0].open + sorted[0].high + sorted[0].low + sorted[0].close) / 4;
+
+  for (let i = 0; i < sorted.length; i++) {
+    const bar = sorted[i];
+    const close = (bar.open + bar.high + bar.low + bar.close) / 4;
+    // The first bar has no predecessor, so it seeds from its own open/close.
+    const open = i === 0 ? (bar.open + bar.close) / 2 : (prevOpen + prevClose) / 2;
+    out.push(
+      makeCandle(
+        bar.epochSeconds,
+        open,
+        Math.max(bar.high, open, close),
+        Math.min(bar.low, open, close),
+        close,
+        bar.volume
+      )
+    );
+    prevOpen = open;
+    prevClose = close;
+  }
+  return out;
+}
+
 /** ISO-style year-week key in IST. Weeks start Monday. */
 function istWeekKey(epochSeconds: number): string {
   const d = istDate(epochSeconds);

@@ -100,6 +100,58 @@
   --accent-foreground: 0 0% 86%;
 }
 
+/* ---------------------------------------------------------------------------
+   Wave Lab — the Elliott terminal's own Kite palette (§10 of the build brief).
+
+   Separate from .kite-theme above because that one redefines the app's
+   shadcn-style tokens for the Nifty Weekly page, whereas this is a standalone
+   full-screen surface with its own vocabulary (profit/loss/amber, a numeric
+   font). Driven by data-theme so the in-app toggle wins over the system
+   preference in both directions, which a bare prefers-color-scheme cannot do.
+--------------------------------------------------------------------------- */
+.wave-lab {
+  --wl-bg: #ffffff;
+  --wl-subtle: #f9f9f9;
+  --wl-hover: #f4f4f4;
+  --wl-border: #e5e5e5;
+  --wl-border-strong: #d8d8d8;
+
+  --wl-text: #444444;
+  --wl-text-strong: #222222;
+  --wl-muted: #9b9b9b;
+
+  --wl-blue: #387ed1;
+  --wl-buy: #4184f3;
+  --wl-sell: #ff5722;
+  --wl-profit: #00b386;
+  --wl-loss: #eb5b3c;
+  --wl-amber: #f6a821;
+
+  --wl-font-num: "Inter", ui-monospace, monospace;
+
+  font-family: "Inter", -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+}
+
+.wave-lab[data-theme="dark"] {
+  --wl-bg: #1a1a1a;
+  --wl-subtle: #2a2a2a;
+  --wl-hover: #2f2f2f;
+  --wl-border: #333333;
+  --wl-border-strong: #3d3d3d;
+
+  --wl-text: #c9c9c9;
+  --wl-text-strong: #eaeaea;
+  --wl-muted: #8a8a8a;
+}
+
+/* Every price and quantity in tabular figures — digits that change width while
+   streaming are the fastest way to look amateur. */
+.wave-lab [class*="tabular-nums"],
+.wave-lab input[inputmode="decimal"] {
+  font-variant-numeric: tabular-nums;
+}
+
 /* Kite sets prices in tabular figures so digits don't jitter between rows. */
 .kite-num {
   font-variant-numeric: tabular-nums;

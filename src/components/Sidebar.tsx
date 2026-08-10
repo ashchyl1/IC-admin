@@ -10,6 +10,7 @@ import {
   Crosshair,
   CalendarRange,
   CandlestickChart,
+  Waves,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -30,6 +31,7 @@ const NAV = [
  * expectation before the click rather than after.
  */
 const WORKSPACES = [
+  { href: "/wave-lab", label: "Wave Lab", icon: Waves },
   { href: "/paper-trading", label: "Paper Trading", icon: CandlestickChart },
 ];
 

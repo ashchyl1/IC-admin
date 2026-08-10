@@ -6,6 +6,7 @@ import {
   makeCandle,
   mergeCandles,
   sliceRange,
+  toHeikinAshi,
 } from "@/lib/wave-lab/candles";
 import { CandleStore } from "@/lib/wave-lab/store";
 import { SyntheticProvider } from "@/lib/wave-lab/providers/synthetic";
@@ -115,6 +116,46 @@ describe("aggregation to weekly", () => {
 
   it("returns nothing for no input", () => {
     expect(aggregateDaily([], "1W")).toEqual([]);
+  });
+});
+
+describe("heikin-ashi", () => {
+  const bars = [
+    at("2026-08-03T00:00:00+05:30", 100, 110, 95, 105),
+    at("2026-08-04T00:00:00+05:30", 105, 118, 103, 115),
+    at("2026-08-05T00:00:00+05:30", 115, 116, 100, 102),
+  ];
+
+  it("closes at the average of OHLC", () => {
+    const ha = toHeikinAshi(bars);
+    expect(ha[0].close).toBeCloseTo((100 + 110 + 95 + 105) / 4, 6);
+  });
+
+  it("seeds the first bar's open from its own open and close", () => {
+    expect(toHeikinAshi(bars)[0].open).toBeCloseTo((100 + 105) / 2, 6);
+  });
+
+  it("opens each later bar at the midpoint of the previous HA bar", () => {
+    const ha = toHeikinAshi(bars);
+    expect(ha[1].open).toBeCloseTo((ha[0].open + ha[0].close) / 2, 6);
+  });
+
+  it("keeps high above and low below its own open and close", () => {
+    for (const b of toHeikinAshi(bars)) {
+      expect(b.high).toBeGreaterThanOrEqual(Math.max(b.open, b.close));
+      expect(b.low).toBeLessThanOrEqual(Math.min(b.open, b.close));
+    }
+  });
+
+  it("preserves bar count, timestamps and volume", () => {
+    const ha = toHeikinAshi(bars);
+    expect(ha).toHaveLength(bars.length);
+    expect(ha.map((b) => b.epochSeconds)).toEqual(bars.map((b) => b.epochSeconds));
+    expect(ha.map((b) => b.volume)).toEqual(bars.map((b) => b.volume));
+  });
+
+  it("returns nothing for no input", () => {
+    expect(toHeikinAshi([])).toEqual([]);
   });
 });
 
