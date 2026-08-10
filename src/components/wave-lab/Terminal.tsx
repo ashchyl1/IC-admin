@@ -17,7 +17,9 @@ import {
   type TerminalConfig,
   type TerminalId,
 } from "@/lib/wave-lab/workspace-store";
-import { PriceChart, type HoverReadout } from "./PriceChart";
+import { PriceChart, type ChartBridge, type HoverReadout } from "./PriceChart";
+import { DrawingOverlay } from "./DrawingOverlay";
+import { DrawingToolbar } from "./DrawingToolbar";
 import { SymbolSearch } from "./SymbolSearch";
 
 const STYLES: { value: SeriesStyle; label: string }[] = [
@@ -59,6 +61,7 @@ export function Terminal({ id, dark }: { id: TerminalId; dark: boolean }) {
 
   const [state, setState] = React.useState<LoadState>(EMPTY);
   const [hover, setHover] = React.useState<HoverReadout | null>(null);
+  const [bridge, setBridge] = React.useState<ChartBridge | null>(null);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -156,6 +159,8 @@ export function Terminal({ id, dark }: { id: TerminalId; dark: boolean }) {
         <Readout hover={hover} config={config} candles={state.candles} />
       </header>
 
+      <DrawingToolbar terminal={id} />
+
       {/* -------------------------------------------------------- banners -- */}
       {!state.live && !state.loading && !state.error && (
         <Banner tone="amber">
@@ -182,14 +187,20 @@ export function Terminal({ id, dark }: { id: TerminalId; dark: boolean }) {
             No candles for {config.symbol} at {config.interval} in this range.
           </p>
         ) : (
-          <PriceChart
-            candles={state.candles}
-            style={config.style}
-            logScale={config.logScale}
-            showVolume={config.showVolume}
-            dark={dark}
-            onHover={setHover}
-          />
+          <>
+            <PriceChart
+              candles={state.candles}
+              style={config.style}
+              logScale={config.logScale}
+              showVolume={config.showVolume}
+              dark={dark}
+              onHover={setHover}
+              onBridge={setBridge}
+            />
+            {/* Sits above the canvas; see DrawingOverlay for why it owns the
+                pointer handling rather than the chart doing it. */}
+            <DrawingOverlay terminal={id} bridge={bridge} dark={dark} />
+          </>
         )}
       </div>
     </section>

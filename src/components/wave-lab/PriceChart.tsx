@@ -50,6 +50,30 @@ export interface HoverReadout {
   changePercent: number;
 }
 
+/**
+ * The chart's coordinate converters, handed outward so the SVG overlay can
+ * redraw from them (§1).
+ *
+ * The overlay cannot own these — only the chart knows where a price sits after
+ * a pan, a zoom or a scale change — so it subscribes and re-renders whenever
+ * `subscribe` fires.
+ */
+export interface ChartBridge {
+  toScreen(point: { time: number; price: number }): { x: number; y: number } | null;
+  toChart(point: { x: number; y: number }): { time: number; price: number } | null;
+  /** Fires on visible-range change and on resize. Returns an unsubscribe. */
+  subscribe(listener: () => void): () => void;
+  size(): { width: number; height: number };
+  /**
+   * Freeze pan/zoom for the duration of a handle drag.
+   *
+   * Without this the same pointer movement that drags a pivot also scrolls the
+   * chart underneath it, so the pivot appears to stick to the cursor while the
+   * price behind it slides — which is §12.2's failure wearing a different hat.
+   */
+  setInteractive(enabled: boolean): void;
+}
+
 interface Props {
   candles: MarketCandle[];
   style: SeriesStyle;
@@ -57,13 +81,25 @@ interface Props {
   showVolume: boolean;
   dark: boolean;
   onHover?: (readout: HoverReadout | null) => void;
+  /** Called once the chart exists, and with null when it is torn down. */
+  onBridge?: (bridge: ChartBridge | null) => void;
 }
 
-export function PriceChart({ candles, style, logScale, showVolume, dark, onHover }: Props) {
+export function PriceChart({
+  candles,
+  style,
+  logScale,
+  showVolume,
+  dark,
+  onHover,
+  onBridge,
+}: Props) {
   const hostRef = React.useRef<HTMLDivElement>(null);
   const chartRef = React.useRef<IChartApi | null>(null);
   const priceRef = React.useRef<ISeriesApi<"Candlestick" | "Line" | "Area"> | null>(null);
   const volumeRef = React.useRef<ISeriesApi<"Histogram"> | null>(null);
+  /** Overlay listeners, notified whenever the projection changes. */
+  const bridgeListeners = React.useRef(new Set<() => void>());
 
   // Hover needs the current bars, but must not rebuild the chart when they
   // change — a ref keeps the subscription stable across data updates.
@@ -71,6 +107,8 @@ export function PriceChart({ candles, style, logScale, showVolume, dark, onHover
   candlesRef.current = candles;
   const onHoverRef = React.useRef(onHover);
   onHoverRef.current = onHover;
+  const onBridgeRef = React.useRef(onBridge);
+  onBridgeRef.current = onBridge;
 
   // ---------------------------------------------------------------- chart ---
   React.useEffect(() => {
@@ -101,7 +139,48 @@ export function PriceChart({ candles, style, logScale, showVolume, dark, onHover
     });
     chartRef.current = chart;
 
+    // ---- bridge -----------------------------------------------------------
+    // Rebuilt with the chart, because every converter closes over this
+    // instance. Handing a stale bridge to the overlay would project pivots
+    // through a chart that no longer exists.
+    const notify = () => bridgeListeners.current.forEach((l) => l());
+    chart.timeScale().subscribeVisibleLogicalRangeChange(notify);
+    const observer = new ResizeObserver(notify);
+    observer.observe(host);
+
+    const bridge: ChartBridge = {
+      toScreen({ time, price }) {
+        const series = priceRef.current;
+        if (!series) return null;
+        const x = chart.timeScale().timeToCoordinate(time as UTCTimestamp);
+        const y = series.priceToCoordinate(price);
+        // Off-screen points return null from the library; propagate that
+        // rather than coercing to 0, which would stack pivots on the y-axis.
+        return x === null || y === null ? null : { x, y };
+      },
+      toChart({ x, y }) {
+        const series = priceRef.current;
+        if (!series) return null;
+        const time = chart.timeScale().coordinateToTime(x);
+        const price = series.coordinateToPrice(y);
+        if (time === null || price === null) return null;
+        return { time: time as number, price };
+      },
+      subscribe(listener) {
+        bridgeListeners.current.add(listener);
+        return () => bridgeListeners.current.delete(listener);
+      },
+      size: () => ({ width: host.clientWidth, height: host.clientHeight }),
+      setInteractive(enabled) {
+        chart.applyOptions({ handleScroll: enabled, handleScale: enabled });
+      },
+    };
+    onBridgeRef.current?.(bridge);
+
     return () => {
+      onBridgeRef.current?.(null);
+      observer.disconnect();
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(notify);
       chart.remove();
       chartRef.current = null;
       priceRef.current = null;
