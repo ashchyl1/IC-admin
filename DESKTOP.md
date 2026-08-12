@@ -16,7 +16,18 @@ So the packaged app contains Next's standalone server output, and
 `electron/main.js` forks it with `ELECTRON_RUN_AS_NODE=1` — Electron's own Node
 runs it, and the user does not need Node installed.
 
-## Building
+## Getting the .exe without building it
+
+`.github/workflows/desktop.yml` builds it on a real Windows runner, which is the
+best of the options: no Wine constraints, so you get the NSIS installer *and* a
+properly branded executable.
+
+- **Actions tab → Desktop build (Windows) → Run workflow.** When it finishes,
+  download the `IndiaCharts-windows` artifact from the run summary.
+- **Or push a tag** — `git tag v0.1.0 && git push --tags` — and the same build
+  attaches the files to a GitHub release.
+
+## Building it yourself
 
 On any platform with Node 20+:
 

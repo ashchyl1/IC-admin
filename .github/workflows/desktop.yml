@@ -1,0 +1,65 @@
+name: Desktop build (Windows)
+
+# Manual, not on every push: the job takes several minutes and produces a
+# 300 MB artifact, neither of which belongs on an ordinary commit. Run it from
+# the Actions tab when you want an installer, or push a v* tag to cut a release.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # Building on Windows is the point of this job rather than a convenience.
+      # A cross-build from Linux cannot produce the NSIS installer — generating
+      # Uninstall.exe means running the compiled installer once — and cannot
+      # stamp the executable's icon and version strings, which needs rcedit.
+      # Here both work with no Wine involved.
+      - name: Build
+        run: npm run desktop:win
+        env:
+          # The seed database only has to exist for `prisma generate`; the app
+          # copies it to the user's data folder on first launch.
+          DATABASE_URL: file:./prisma/dev.db
+
+      - name: Check the artifacts exist
+        shell: pwsh
+        run: |
+          $found = Get-ChildItem release -Filter *.exe -ErrorAction SilentlyContinue
+          if (-not $found) { throw "No .exe produced in release/" }
+          $found | ForEach-Object { "{0}  {1:N1} MB" -f $_.Name, ($_.Length / 1MB) }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IndiaCharts-windows
+          path: |
+            release/*.exe
+            release/*.zip
+          retention-days: 14
+          if-no-files-found: error
+
+      # Tag pushes additionally get a downloadable release.
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*.exe
+            release/*.zip
+          generate_release_notes: true
