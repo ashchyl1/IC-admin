@@ -22,6 +22,7 @@ export function IndicatorSettings({ terminal }: { terminal: TerminalId }) {
   const toggleEma = useIndicators((s) => s.toggleEma);
   const patchEma = useIndicators((s) => s.patchEma);
   const patchBollinger = useIndicators((s) => s.patchBollinger);
+  const patchRmi = useIndicators((s) => s.patchRmi);
   const reset = useIndicators((s) => s.reset);
   const boxRef = React.useRef<HTMLDivElement>(null);
 
@@ -36,7 +37,9 @@ export function IndicatorSettings({ terminal }: { terminal: TerminalId }) {
 
   if (!config) return null;
   const activeCount =
-    config.emas.filter((e) => e.visible).length + (config.bollinger.visible ? 1 : 0);
+    config.emas.filter((e) => e.visible).length +
+    (config.bollinger.visible ? 1 : 0) +
+    (config.rmi.visible ? 1 : 0);
 
   return (
     <div ref={boxRef} className="relative">
@@ -199,8 +202,140 @@ export function IndicatorSettings({ terminal }: { terminal: TerminalId }) {
               />
             </div>
           </div>
+
+          {/* ------------------------------------------------- RMI ------ */}
+          <h3 className="mt-3 border-t border-[var(--wl-border)] pt-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--wl-muted)]">
+            RMI Scaled (Wilder&apos;s)
+          </h3>
+          <div className="mt-1.5 space-y-1.5">
+            <label className="flex items-center gap-1.5 text-[11px] text-[var(--wl-text)]">
+              <input
+                type="checkbox"
+                checked={config.rmi.visible}
+                onChange={() => patchRmi(terminal, { visible: !config.rmi.visible })}
+                aria-label="Show RMI Scaled"
+                className="h-3 w-3"
+              />
+              Show in its own pane
+            </label>
+
+            <div className="grid grid-cols-2 gap-1.5">
+              <NumberField
+                label="Lookback"
+                value={config.rmi.lookback}
+                min={1}
+                onChange={(lookback) => patchRmi(terminal, { lookback })}
+              />
+              <NumberField
+                label="Smoothing"
+                value={config.rmi.smoothLen}
+                min={1}
+                onChange={(smoothLen) => patchRmi(terminal, { smoothLen })}
+              />
+              <NumberField
+                label="Divisor"
+                value={config.rmi.scaleFactor}
+                min={0.1}
+                step={0.1}
+                onChange={(scaleFactor) => patchRmi(terminal, { scaleFactor })}
+              />
+              <NumberField
+                label="Signal len"
+                value={config.rmi.signalLen}
+                min={1}
+                onChange={(signalLen) => patchRmi(terminal, { signalLen })}
+              />
+              <NumberField
+                label="OB level"
+                value={config.rmi.obLevel}
+                step={0.5}
+                onChange={(obLevel) => patchRmi(terminal, { obLevel })}
+              />
+              <NumberField
+                label="OS level"
+                value={config.rmi.osLevel}
+                step={0.5}
+                onChange={(osLevel) => patchRmi(terminal, { osLevel })}
+              />
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-[var(--wl-muted)]">Signal</span>
+              <select
+                value={config.rmi.signalType}
+                onChange={(e) =>
+                  patchRmi(terminal, { signalType: e.target.value as "SMA" | "EMA" })
+                }
+                aria-label="RMI signal type"
+                className="rounded-[3px] border border-[var(--wl-border)] bg-transparent px-1 py-0.5 text-[10px] text-[var(--wl-text)]"
+              >
+                <option value="EMA">EMA</option>
+                <option value="SMA">SMA</option>
+              </select>
+              <input
+                type="color"
+                value={config.rmi.rmiColor}
+                onChange={(e) => patchRmi(terminal, { rmiColor: e.target.value })}
+                aria-label="RMI line colour"
+                title="RMI line"
+                className="h-5 w-6 cursor-pointer rounded-[3px] border border-[var(--wl-border)] bg-transparent p-0"
+              />
+              <input
+                type="color"
+                value={config.rmi.signalColor}
+                onChange={(e) => patchRmi(terminal, { signalColor: e.target.value })}
+                aria-label="RMI signal colour"
+                title="Signal line"
+                className="h-5 w-6 cursor-pointer rounded-[3px] border border-[var(--wl-border)] bg-transparent p-0"
+              />
+              <select
+                value={config.rmi.width}
+                onChange={(e) => patchRmi(terminal, { width: Number(e.target.value) })}
+                aria-label="RMI thickness"
+                className="ml-auto rounded-[3px] border border-[var(--wl-border)] bg-transparent px-1 py-0.5 text-[10px] text-[var(--wl-text)]"
+              >
+                {[1, 2, 3].map((w) => (
+                  <option key={w} value={w}>
+                    {w}px
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
         </div>
       )}
     </div>
+  );
+}
+
+function NumberField({
+  label,
+  value,
+  min,
+  step,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min?: number;
+  step?: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <label className="flex items-center gap-1 text-[10px] text-[var(--wl-muted)]">
+      <span className="w-14 shrink-0">{label}</span>
+      <input
+        type="number"
+        value={value}
+        min={min}
+        step={step ?? 1}
+        onChange={(e) => {
+          const n = Number(e.target.value);
+          if (Number.isFinite(n) && (min === undefined || n >= min)) onChange(n);
+        }}
+        aria-label={label}
+        className="w-full rounded-[3px] border border-[var(--wl-border)] bg-transparent px-1 py-0.5 text-[11px] tabular-nums text-[var(--wl-text)]"
+      />
+    </label>
   );
 }

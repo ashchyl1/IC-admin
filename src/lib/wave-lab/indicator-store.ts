@@ -32,9 +32,31 @@ export interface BollingerConfig {
   width: number;
 }
 
+/**
+ * RMI Scaled (Wilder's). Unlike the EMAs and Bollinger this is `overlay=false`
+ * in the original Pine, so it gets its own pane below the price rather than
+ * being drawn on it.
+ */
+export interface RmiConfig {
+  visible: boolean;
+  lookback: number;
+  smoothLen: number;
+  scaleFactor: number;
+  signalType: "SMA" | "EMA";
+  signalLen: number;
+  rmiColor: string;
+  signalColor: string;
+  width: number;
+  obLevel: number;
+  osLevel: number;
+  /** Shaded area between the RMI and its signal. */
+  fill: boolean;
+}
+
 export interface TerminalIndicators {
   emas: EmaConfig[];
   bollinger: BollingerConfig;
+  rmi: RmiConfig;
 }
 
 /** Distinct hues so four averages stay tellable apart on a dense chart. */
@@ -60,6 +82,21 @@ function defaultIndicators(): TerminalIndicators {
       fillOpacity: 0.08,
       width: 1,
     },
+    // Straight from the Pine study's own input defaults.
+    rmi: {
+      visible: false,
+      lookback: 6,
+      smoothLen: 11,
+      scaleFactor: 4.5,
+      signalType: "EMA",
+      signalLen: 9,
+      rmiColor: "#00b386",
+      signalColor: "#eb5b3c",
+      width: 2,
+      obLevel: 6,
+      osLevel: -6,
+      fill: true,
+    },
   };
 }
 
@@ -68,6 +105,7 @@ interface IndicatorState {
   toggleEma: (t: TerminalId, id: string) => void;
   patchEma: (t: TerminalId, id: string, patch: Partial<EmaConfig>) => void;
   patchBollinger: (t: TerminalId, patch: Partial<BollingerConfig>) => void;
+  patchRmi: (t: TerminalId, patch: Partial<RmiConfig>) => void;
   reset: (t: TerminalId) => void;
 }
 
@@ -108,9 +146,35 @@ export const useIndicators = create<IndicatorState>()(
           },
         })),
 
+      patchRmi: (t, patch) =>
+        set((s) => ({
+          byTerminal: {
+            ...s.byTerminal,
+            [t]: { ...s.byTerminal[t], rmi: { ...s.byTerminal[t].rmi, ...patch } },
+          },
+        })),
+
       reset: (t) =>
         set((s) => ({ byTerminal: { ...s.byTerminal, [t]: defaultIndicators() } })),
     }),
-    { name: "wave-lab.indicators", version: 1 }
+    {
+      name: "wave-lab.indicators",
+      // v2 adds the RMI block. Merged rather than migrated so a store saved
+      // before it existed does not come back with `rmi` undefined and crash
+      // every read of `config.rmi.visible`.
+      version: 2,
+      merge: (persisted, current) => {
+        const saved = persisted as Partial<IndicatorState> | undefined;
+        if (!saved?.byTerminal) return current;
+        const base = defaultIndicators();
+        return {
+          ...current,
+          byTerminal: {
+            A: { ...base, ...saved.byTerminal.A, rmi: { ...base.rmi, ...saved.byTerminal.A?.rmi } },
+            B: { ...base, ...saved.byTerminal.B, rmi: { ...base.rmi, ...saved.byTerminal.B?.rmi } },
+          },
+        };
+      },
+    }
   )
 );

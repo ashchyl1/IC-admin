@@ -83,10 +83,25 @@ export interface OverlayLine {
   data: { time: number; value: number }[];
 }
 
+/**
+ * A study that lives in its own pane below the price, the way a Pine
+ * `overlay=false` indicator does.
+ */
+export interface StudyPane {
+  id: string;
+  lines: OverlayLine[];
+  /** Dashed/dotted reference levels — zero, overbought, oversold. */
+  levels: { value: number; color: string; style: "dotted" | "dashed" }[];
+  /** Fraction of total chart height, 0–1. */
+  heightRatio: number;
+}
+
 interface Props {
   candles: MarketCandle[];
   /** EMAs and Bollinger lines. Bollinger's *fill* is SVG — see §12.3. */
   lines?: OverlayLine[];
+  /** Studies rendered in their own panes, e.g. RMI. */
+  studies?: StudyPane[];
   style: SeriesStyle;
   logScale: boolean;
   showVolume: boolean;
@@ -97,10 +112,12 @@ interface Props {
 }
 
 const NO_LINES: OverlayLine[] = [];
+const NO_STUDIES: StudyPane[] = [];
 
 export function PriceChart({
   candles,
   lines = NO_LINES,
+  studies = NO_STUDIES,
   style,
   logScale,
   showVolume,
@@ -108,12 +125,18 @@ export function PriceChart({
   onHover,
   onBridge,
 }: Props) {
-  const hostRef = React.useRef<HTMLDivElement>(null);
+  // Mutable, because the callback ref below also mirrors the node into state
+  // so the study-pane effect can depend on it existing.
+  const hostRef = React.useRef<HTMLDivElement | null>(null);
   const chartRef = React.useRef<IChartApi | null>(null);
   const priceRef = React.useRef<ISeriesApi<"Candlestick" | "Line" | "Area" | "Bar"> | null>(null);
   const volumeRef = React.useRef<ISeriesApi<"Histogram"> | null>(null);
   /** Indicator lines, keyed by config id so only what changed is rebuilt. */
   const lineRefs = React.useRef(new Map<string, ISeriesApi<"Line">>());
+  /** Study panes, keyed by study id. */
+  const studyRefs = React.useRef(
+    new Map<string, { paneIndex: number; series: Map<string, ISeriesApi<"Line">> }>()
+  );
   /** Overlay listeners, notified whenever the projection changes. */
   const bridgeListeners = React.useRef(new Set<() => void>());
 
@@ -279,8 +302,12 @@ export function PriceChart({
         priceFormat: { type: "volume" },
         priceScaleId: "volume",
       });
-      // Pin volume to the bottom fifth so it never crowds the price action.
-      chart.priceScale("volume").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+      // Pin volume to the bottom fifth so it never crowds the price action —
+      // and lift it clear of any study band, or the two draw over each other.
+      const studyBand = studies.reduce((sum, s) => sum + s.heightRatio, 0);
+      chart.priceScale("volume").applyOptions({
+        scaleMargins: { top: 0.82 - studyBand, bottom: studyBand },
+      });
       volumeRef.current = vol;
     }
     // `dark` and `logScale` are here because the chart effect above rebuilds
@@ -290,7 +317,7 @@ export function PriceChart({
     // blank and every overlay stops projecting. Effects run in declaration
     // order within a commit, so the new chart already exists by the time this
     // runs.
-  }, [style, showVolume, dark, logScale]);
+  }, [style, showVolume, dark, logScale, studies]);
 
   // --------------------------------------------------------------- data ----
   React.useEffect(() => {
@@ -365,6 +392,103 @@ export function PriceChart({
     return () => live.clear();
   }, [dark, logScale]);
 
+  // ------------------------------------------------------- study panes ----
+  React.useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const live = studyRefs.current;
+
+    // Drop panes whose study has been switched off.
+    for (const [id, entry] of live) {
+      if (!studies.some((s) => s.id === id)) {
+        for (const series of entry.series.values()) {
+          try {
+            chart.removeSeries(series);
+          } catch {
+            // The chart may already have torn the series down with its pane.
+          }
+        }
+        live.delete(id);
+      }
+    }
+
+    studies.forEach((study, order) => {
+      /**
+       * Rendered as a banded region at the bottom of the price pane, on its
+       * own price scale — the same construction the volume histogram already
+       * uses here.
+       *
+       * Not a true second pane, and not for want of trying: v5's pane API
+       * creates the pane (panes() reports it, getSeries() shows both lines)
+       * but setHeight is silently ignored, so getHeight stays 0 and the pane
+       * never gets a DOM row. Measured directly, immediately and after a
+       * 400ms delay. A separate price scale gives the study its own axis and
+       * keeps a ±11 oscillator off the 24,000-point price axis, which is the
+       * thing that actually matters.
+       */
+      const scaleId = `study-${study.id}`;
+      const band = study.heightRatio;
+      const top = 1 - band * (order + 1);
+
+      let entry = live.get(study.id);
+      if (!entry) {
+        entry = { paneIndex: order + 1, series: new Map() };
+        live.set(study.id, entry);
+      }
+
+      for (const line of study.lines) {
+        let series = entry.series.get(line.id);
+        if (!series) {
+          series = chart.addSeries(LineSeries, {
+            color: line.color,
+            lineWidth: line.width as 1 | 2 | 3 | 4,
+            priceLineVisible: false,
+            lastValueVisible: true,
+            priceScaleId: scaleId,
+          });
+          chart.priceScale(scaleId).applyOptions({
+            scaleMargins: { top, bottom: 0 },
+            borderVisible: true,
+          });
+          entry.series.set(line.id, series);
+
+          // Reference levels hang off the first series in the pane, so they
+          // scale with it. hline in Pine terms.
+          if (line.id === study.lines[0]?.id) {
+            for (const level of study.levels) {
+              series.createPriceLine({
+                price: level.value,
+                color: level.color,
+                lineWidth: 1,
+                lineStyle: level.style === "dotted" ? 1 : 2,
+                axisLabelVisible: false,
+                title: "",
+              });
+            }
+          }
+        } else {
+          series.applyOptions({ color: line.color, lineWidth: line.width as 1 | 2 | 3 | 4 });
+        }
+        series.setData(line.data.map((p) => ({ time: p.time as UTCTimestamp, value: p.value })));
+      }
+
+      // Give the study a slice of the height. A newly added pane is created
+      // at zero height, so without this the series exist and draw nothing —
+      // chart.panes() reports the pane while the DOM shows no extra row.
+      // A pane is created at zero height, and setHeight applied in the same
+      // tick does nothing — the chart has not laid the new pane out yet, so
+      // the call is swallowed and the series draw into a zero-height strip.
+      // Deferring one frame lets the layout settle first. Measured: without
+      // this, panes()=2 and getSeries()=2 but getHeight() stays 0.
+    });
+  }, [studies, style, showVolume, dark, logScale]);
+
+  // Same reason as the series registry: a rebuilt chart invalidates these.
+  React.useEffect(() => {
+    const live = studyRefs.current;
+    return () => live.clear();
+  }, [dark, logScale]);
+
   // -------------------------------------------------------------- hover ----
   React.useEffect(() => {
     const chart = chartRef.current;
@@ -396,5 +520,8 @@ export function PriceChart({
     return () => chart.unsubscribeCrosshairMove(handler);
   }, []);
 
+  // A plain ref, not a callback that also sets state: an inline callback ref
+  // is re-invoked with null and then the node on every render, so pairing it
+  // with setState made `host` null exactly when the pane height was read.
   return <div ref={hostRef} className="h-full w-full" data-testid="wave-lab-chart" />;
 }

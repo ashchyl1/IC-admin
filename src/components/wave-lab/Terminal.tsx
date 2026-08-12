@@ -17,9 +17,15 @@ import {
   type TerminalConfig,
   type TerminalId,
 } from "@/lib/wave-lab/workspace-store";
-import { bollinger, defined, ema } from "@/lib/wave-lab/indicators";
+import { bollinger, defined, ema, rmiScaled } from "@/lib/wave-lab/indicators";
 import { useIndicators } from "@/lib/wave-lab/indicator-store";
-import { PriceChart, type ChartBridge, type HoverReadout, type OverlayLine } from "./PriceChart";
+import {
+  PriceChart,
+  type ChartBridge,
+  type HoverReadout,
+  type OverlayLine,
+  type StudyPane,
+} from "./PriceChart";
 import { AnalysisPanel } from "./AnalysisPanel";
 import { BandFill } from "./BandFill";
 import { IndicatorSettings } from "./IndicatorSettings";
@@ -108,6 +114,38 @@ export function Terminal({ id, dark }: { id: TerminalId; dark: boolean }) {
     }
     return out;
   }, [indicators, bands, state.candles]);
+
+  /**
+   * RMI Scaled gets its own pane — the Pine study is `overlay=false`, and
+   * putting a ±11 oscillator on a 24,000-point price axis would flatten it
+   * into a line at the bottom of the chart.
+   */
+  const studies = React.useMemo<StudyPane[]>(() => {
+    const cfg = indicators?.rmi;
+    if (!cfg?.visible) return [];
+    const { rmi, signal } = rmiScaled(state.candles, {
+      lookback: cfg.lookback,
+      smoothLen: cfg.smoothLen,
+      scaleFactor: cfg.scaleFactor,
+      signalType: cfg.signalType,
+      signalLen: cfg.signalLen,
+    });
+    return [
+      {
+        id: "rmi",
+        heightRatio: 0.28,
+        lines: [
+          { id: "rmi-line", color: cfg.rmiColor, width: cfg.width, data: defined(rmi) },
+          { id: "rmi-signal", color: cfg.signalColor, width: cfg.width, data: defined(signal) },
+        ],
+        levels: [
+          { value: 0, color: "#9b9b9b", style: "dotted" },
+          { value: cfg.obLevel, color: "#eb5b3c", style: "dashed" },
+          { value: cfg.osLevel, color: "#00b386", style: "dashed" },
+        ],
+      },
+    ];
+  }, [indicators?.rmi, state.candles]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -248,6 +286,7 @@ export function Terminal({ id, dark }: { id: TerminalId; dark: boolean }) {
             <PriceChart
               candles={state.candles}
               lines={lines}
+              studies={studies}
               style={config.style}
               logScale={config.logScale}
               showVolume={config.showVolume}
