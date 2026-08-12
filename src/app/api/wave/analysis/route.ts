@@ -21,7 +21,15 @@ export const runtime = "nodejs";
  *   POST /api/wave/analysis          save a bundle, returns its id
  */
 
-const DIRECTORY = path.join(process.cwd(), "data", "wave-analyses");
+/**
+ * `WAVE_ANALYSIS_DIR` exists for the desktop build. There, the application is
+ * installed read-only — under Program Files, inside an asar — so the repository
+ * path is not writable and `process.cwd()` is not the repository anyway. Electron
+ * points this at the per-user data folder.
+ */
+const DIRECTORY = process.env.WAVE_ANALYSIS_DIR?.trim()
+  ? path.resolve(process.env.WAVE_ANALYSIS_DIR.trim())
+  : path.join(process.cwd(), "data", "wave-analyses");
 const MAX_BYTES = 8 * 1024 * 1024;
 
 export async function GET(request: Request) {

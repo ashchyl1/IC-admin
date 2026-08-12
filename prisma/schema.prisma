@@ -3,6 +3,11 @@
 
 generator client {
   provider = "prisma-client-js"
+  // "windows" is here for the Electron build, which is cross-compiled from
+  // Linux: the query engine is a native binary picked at generate time, not at
+  // run time, so without this the packaged Windows app starts and then fails
+  // every database route with a missing-engine error.
+  binaryTargets = ["native", "windows"]
 }
 
 datasource db {

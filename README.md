@@ -74,6 +74,13 @@ read-only analysis.
 | `/paper-trading` | Historical bar-by-bar replay with a Supabase-backed ledger | [PAPER_TRADING.md](PAPER_TRADING.md) |
 | `/scalper` | Scalper Window — single-screen NIFTY/BANKNIFTY options scalping pad, mock feed, no sign-in | [SCALPER_WINDOW.md](SCALPER_WINDOW.md) |
 
+## Desktop build
+
+The whole app packages into a Windows executable — `npm run desktop:win` produces
+an installer and a portable `.exe`. Electron runs Next's standalone server on
+localhost inside the app, so the API routes and the broker credentials stay
+server-side exactly as they do on the web. See [DESKTOP.md](DESKTOP.md).
+
 ## Not in this MVP (scoped out; extend later)
 
 Auth/roles (viewer/editor/admin) are stubbed to a single env-based admin. Settings/Sources registry, webhook secret, and the optional future fields (`bias`, `entry`, `stop_loss`, `target`, `tags[]`) are deferred — the schema and API are shaped so they can be added without a redesign.

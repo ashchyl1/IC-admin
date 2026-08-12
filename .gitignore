@@ -29,3 +29,11 @@ data/wave-analyses/*
 
 # standalone build output -- rebuild with scripts/build-artifact.mjs
 artifact/wave-lab.html
+
+# desktop build output -- rebuild with `npm run desktop:prepare`
+.next-desktop/
+dist-desktop/
+release/
+
+# stale electron-builder default output dir
+dist/
