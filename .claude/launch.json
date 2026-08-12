@@ -8,6 +8,13 @@
       "port": 3040
     },
     {
+      "_comment": "Same app on a spare port, for when 3040 is already taken by another copy of the project.",
+      "name": "indiacharts-admin-3041",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:3041"],
+      "port": 3041
+    },
+    {
       "name": "zerodha-backend",
       "runtimeExecutable": "C:\\Claude\\zerodha-integration\\backend\\.venv\\Scripts\\python.exe",
       "runtimeArgs": [

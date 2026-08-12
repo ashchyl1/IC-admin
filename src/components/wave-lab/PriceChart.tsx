@@ -168,11 +168,25 @@ export function PriceChart({
       toScreen({ time, price }) {
         const series = priceRef.current;
         if (!series) return null;
-        const x = chart.timeScale().timeToCoordinate(time as UTCTimestamp);
         const y = series.priceToCoordinate(price);
-        // Off-screen points return null from the library; propagate that
-        // rather than coercing to 0, which would stack pivots on the y-axis.
-        return x === null || y === null ? null : { x, y };
+        if (y === null) return null;
+
+        const x = chart.timeScale().timeToCoordinate(time as UTCTimestamp);
+        if (x !== null) return { x, y };
+
+        // Past the last bar there is no timestamp to look up, so the library
+        // returns null. Extrapolate, exactly as toChart does in the other
+        // direction — otherwise a pivot placed to the right of the data is
+        // stored and rule-checked but never drawn, which is precisely where a
+        // projected wave 5 goes.
+        const bars = candlesRef.current;
+        if (bars.length < 2) return null;
+        const spacing = bars[bars.length - 1].time - bars[bars.length - 2].time;
+        if (!spacing) return null;
+        const lastIndex = bars.length - 1;
+        const logical = lastIndex + (time - bars[lastIndex].time) / spacing;
+        const extrapolatedX = chart.timeScale().logicalToCoordinate(logical as never);
+        return extrapolatedX === null ? null : { x: extrapolatedX, y };
       },
       toChart({ x, y }) {
         const series = priceRef.current;

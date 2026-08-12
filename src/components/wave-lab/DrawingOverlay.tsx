@@ -123,7 +123,14 @@ export function DrawingOverlay({ terminal, bridge, dark, candles }: Props) {
   // ------------------------------------------------------------- pointer ---
   React.useEffect(() => {
     const host = hostRef.current;
-    if (!host || !bridge) return;
+    // Listeners go on the CONTAINER, not on the overlay — §12.1 says so and
+    // this is why: lightweight-charts stamps z-index 1 and 2 onto its
+    // canvases, so they sit above an auto-z-index overlay and swallow every
+    // real click. The overlay is pointer-events:none and purely visual;
+    // events bubble up from the canvas to the container and we read them
+    // there, which also leaves the chart free to pan and zoom natively.
+    const surface = host?.parentElement ?? null;
+    if (!host || !surface || !bridge) return;
 
     const local = (e: PointerEvent): ScreenPoint => {
       const r = host.getBoundingClientRect();
@@ -146,7 +153,7 @@ export function DrawingOverlay({ terminal, bridge, dark, candles }: Props) {
         select(hit.drawingId);
         beginDrag(terminal);
         bridge.setInteractive(false); // stop the chart panning under the drag
-        host.setPointerCapture(e.pointerId);
+        surface.setPointerCapture(e.pointerId);
       }
     };
 
@@ -176,7 +183,7 @@ export function DrawingOverlay({ terminal, bridge, dark, candles }: Props) {
       if (dragRef.current) {
         dragRef.current = null;
         bridge.setInteractive(true);
-        if (host.hasPointerCapture(e.pointerId)) host.releasePointerCapture(e.pointerId);
+        if (surface.hasPointerCapture(e.pointerId)) surface.releasePointerCapture(e.pointerId);
         return;
       }
 
@@ -197,13 +204,28 @@ export function DrawingOverlay({ terminal, bridge, dark, candles }: Props) {
       select(hit ? hit.drawingId : null);
     };
 
-    host.addEventListener("pointerdown", onDown);
-    host.addEventListener("pointermove", onMove);
-    host.addEventListener("pointerup", onUp);
+    // The cursor has to live on the container too, since the overlay is not a
+    // pointer target and cannot show one.
+    surface.style.cursor = activeTool ? "crosshair" : cursorHit ? "pointer" : "";
+    // While a tool is armed, freeze pan/zoom so a slightly-dragged click still
+    // places a pivot instead of scrolling the chart out from under it.
+    bridge.setInteractive(!activeTool);
+
+    // Capture phase, not bubble. lightweight-charts stops propagation inside
+    // its own canvas handlers, so a bubble-phase listener on the container
+    // never sees a real click — it only sees synthetic ones dispatched
+    // straight at the element, which is precisely why this passed every
+    // automated test and failed under an actual mouse. Capture runs before the
+    // target, so nothing downstream can swallow it.
+    const opts = { capture: true } as const;
+    surface.addEventListener("pointerdown", onDown, opts);
+    surface.addEventListener("pointermove", onMove, opts);
+    surface.addEventListener("pointerup", onUp, opts);
     return () => {
-      host.removeEventListener("pointerdown", onDown);
-      host.removeEventListener("pointermove", onMove);
-      host.removeEventListener("pointerup", onUp);
+      surface.style.cursor = "";
+      surface.removeEventListener("pointerdown", onDown, opts);
+      surface.removeEventListener("pointermove", onMove, opts);
+      surface.removeEventListener("pointerup", onUp, opts);
     };
   }, [
     bridge,
@@ -216,6 +238,7 @@ export function DrawingOverlay({ terminal, bridge, dark, candles }: Props) {
     movePivot,
     magnet,
     candles,
+    cursorHit,
   ]);
 
   // Escape abandons a half-placed structure rather than stranding it.
@@ -257,9 +280,13 @@ export function DrawingOverlay({ terminal, bridge, dark, candles }: Props) {
       // `none` so the chart below still pans and zooms normally.
       className="absolute inset-0"
       style={{
-        pointerEvents: "auto",
-        cursor: activeTool ? "crosshair" : cursorHit ? "pointer" : "default",
-        touchAction: "none",
+        // Never a pointer target: the container below handles input, and
+        // making this interactive would block the chart's own pan and zoom.
+        pointerEvents: "none",
+        // Above lightweight-charts' canvases, which carry z-index 1 and 2.
+        // At `auto` the drawings paint *behind* the candles and wave labels
+        // disappear wherever a candle happens to sit.
+        zIndex: 3,
       }}
     >
       <svg
