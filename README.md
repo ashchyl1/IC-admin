@@ -70,6 +70,20 @@ trading only** — no broker is connected and no real order can be placed.
 | `/paper-trading` | Historical bar-by-bar replay with a Supabase-backed ledger | [PAPER_TRADING.md](PAPER_TRADING.md) |
 | `/scalper` | Scalper Window — single-screen NIFTY/BANKNIFTY options scalping pad, mock feed, no sign-in | [SCALPER_WINDOW.md](SCALPER_WINDOW.md) |
 
+## MCP servers
+
+`.mcp.json` registers MCP servers for anyone working on this repo with an
+MCP-aware client (Claude Code and similar). It is checked in so the whole team
+gets the same set; the client prompts before it trusts a project config.
+
+| Server | Endpoint | Notes |
+|--------|----------|-------|
+| `tradingview` | `https://mcp.tradingview.com/mcp` | Streamable HTTP. Charts, symbol and market lookups during development. |
+
+This is tooling for the developer's client only — the app itself does not read
+`.mcp.json`. Wave Lab's in-app market data is a separate path configured
+through `MARKET_PROVIDER` / `KITE_MCP_URL` (see `.env.example`).
+
 ## Not in this MVP (scoped out; extend later)
 
 Auth/roles (viewer/editor/admin) are stubbed to a single env-based admin. Settings/Sources registry, webhook secret, and the optional future fields (`bias`, `entry`, `stop_loss`, `target`, `tags[]`) are deferred — the schema and API are shaped so they can be added without a redesign.
