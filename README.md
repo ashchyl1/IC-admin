@@ -78,11 +78,15 @@ gets the same set; the client prompts before it trusts a project config.
 
 | Server | Endpoint | Notes |
 |--------|----------|-------|
-| `tradingview` | `https://mcp.tradingview.com/mcp` | Streamable HTTP. Charts, symbol and market lookups during development. |
+| `tradingview` | `https://mcp.tradingview.com/mcp` | Streamable HTTP, OAuth sign-in required. Run `/mcp` after authorizing to see the tools it publishes. |
 
 This is tooling for the developer's client only — the app itself does not read
 `.mcp.json`. Wave Lab's in-app market data is a separate path configured
 through `MARKET_PROVIDER` / `KITE_MCP_URL` (see `.env.example`).
+
+Setup, authorization and troubleshooting for the TradingView server are written
+up in [docs/TRADINGVIEW_MCP.md](docs/TRADINGVIEW_MCP.md), with a Word version of
+the same guide at [docs/TradingView-MCP-Guide.docx](docs/TradingView-MCP-Guide.docx).
 
 ## Not in this MVP (scoped out; extend later)
 
