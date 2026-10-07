@@ -70,6 +70,11 @@ trading only** — no broker is connected and no real order can be placed.
 | `/paper-trading` | Historical bar-by-bar replay with a Supabase-backed ledger | [PAPER_TRADING.md](PAPER_TRADING.md) |
 | `/scalper` | Scalper Window — single-screen NIFTY/BANKNIFTY options scalping pad, mock feed, no sign-in | [SCALPER_WINDOW.md](SCALPER_WINDOW.md) |
 
+Outside the app, `tradingview/` holds **Re-Imaged Trendlines**, a TradingView
+indicator: automatic trendlines graded by the chart-image model of Jiang, Kelly
+and Xiu (2023), with a Python fitter for its weights. See
+[tradingview/README.md](tradingview/README.md).
+
 ## Not in this MVP (scoped out; extend later)
 
 Auth/roles (viewer/editor/admin) are stubbed to a single env-based admin. Settings/Sources registry, webhook secret, and the optional future fields (`bias`, `entry`, `stop_loss`, `target`, `tags[]`) are deferred — the schema and API are shaped so they can be added without a redesign.

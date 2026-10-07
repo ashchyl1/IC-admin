@@ -1,0 +1,400 @@
+//@version=6
+// Re-Imaged Trendlines
+//
+// Automatic trendlines read from the same chart "image" that Jiang, Kelly and Xiu
+// feed their CNN in "(Re-)Imag(in)ing Price Trends" (Journal of Finance 78(6), 2023),
+// with each trendline break graded by an image-based probability of an up move.
+//
+// The image: the last N bars (N = 5, 20 or 60) of open/high/low/close, an N-bar
+// moving average and volume, rescaled so the window's highest high and lowest low
+// span the image height and its largest volume spans the volume panel. Every
+// symbol and timeframe ends up on the same scale.
+//
+// The score: a CNN does not fit inside Pine's limits, so P(up) comes from the
+// paper's closest simple stand-in, a logistic model on the 6N image-scaled numbers.
+// Paste weights from fit_weights.py into "Fitted weights". Left blank, the script
+// uses an unfitted prior built on the one pattern the paper names: a close at the
+// low end of the image is followed by higher returns.
+//
+// Trendlines: resistance is the line that no high in the last W bars rises above
+// and that hugs the highs as tightly as possible (the upper convex-hull edge over
+// the window's centre); support is the mirror image on the lows. Both touch at
+// least two bars and need no tuning. A close beyond the line projected to the
+// current bar is a break.
+//
+// The reference implementation is image_trend.py, next to this file. Keep the two
+// in step: tests/test_image_trend.py runs both on the same bars.
+
+indicator("Re-Imaged Trendlines", shorttitle = "ReImg TL", overlay = true, max_bars_back = 500, max_lines_count = 500)
+
+// ───────────────────────────── Inputs ─────────────────────────────
+
+GRP_M = "Image model (Jiang, Kelly & Xiu 2023)"
+N = input.int(20, "Image lookback N", options = [5, 20, 60], group = GRP_M, tooltip = "Bars in the chart image, as in the paper's I5 / I20 / I60 models. The moving average uses the same length.")
+hIn = input.int(5, "Forecast horizon h", minval = 1, maxval = 250, group = GRP_M, tooltip = "Bars ahead that P(up) refers to. Fitted weights carry their own h, which then takes precedence. Used for the on-chart scorecard.")
+weightsTxt = input.text_area("", "Fitted weights", group = GRP_M, tooltip = "Paste the line printed by fit_weights.py (it starts with N=..). Leave blank to use the unfitted paper prior.")
+pHi = input.float(0.53, "P(up) high", minval = 0.5, maxval = 1.0, step = 0.005, group = GRP_M, tooltip = "At or above: the image model leans up. fit_weights.py suggests values from your data.")
+pLo = input.float(0.47, "P(up) low", minval = 0.0, maxval = 0.5, step = 0.005, group = GRP_M, tooltip = "At or below: the image model leans down.")
+
+GRP_T = "Trendlines"
+tlLenIn = input.int(0, "Trendline window W", minval = 0, maxval = 250, group = GRP_T, tooltip = "Bars the trendlines are fitted on. 0 uses the image lookback N.")
+cooldown = input.int(5, "Bars between same-side signals", minval = 0, maxval = 100, group = GRP_T, tooltip = "A break is signalled only if the same line side was not broken in this many previous bars.")
+touchTolPct = input.float(2.0, "Touch tolerance, % of image height", minval = 0.0, maxval = 20.0, step = 0.5, group = GRP_T)
+showLive = input.bool(true, "Show current trendlines", group = GRP_T)
+showBroken = input.bool(true, "Keep broken trendlines", group = GRP_T)
+maxBroken = input.int(40, "Broken trendlines kept", minval = 1, maxval = 240, group = GRP_T)
+
+GRP_D = "Display"
+showDash = input.bool(true, "Dashboard", group = GRP_D, inline = "dash")
+dashPos = input.string("Top right", "", options = ["Top right", "Top left", "Bottom right", "Bottom left"], group = GRP_D, inline = "dash")
+showImg = input.bool(true, "Model's image", group = GRP_D, inline = "img")
+imgPos = input.string("Bottom right", "", options = ["Top right", "Top left", "Bottom right", "Bottom left"], group = GRP_D, inline = "img")
+imgSize = input.string("Medium", "Image size", options = ["Small", "Medium", "Large"], group = GRP_D)
+colorBars = input.bool(false, "Colour bars by P(up)", group = GRP_D)
+colRes = input.color(color.new(#ef5350, 0), "Resistance", group = GRP_D, inline = "lines")
+colSup = input.color(color.new(#26a69a, 0), "Support", group = GRP_D, inline = "lines")
+colUpConf = input.color(color.new(#00c853, 0), "Model agrees: up", group = GRP_D, inline = "grade1")
+colDnConf = input.color(color.new(#d50000, 0), "down", group = GRP_D, inline = "grade1")
+colContra = input.color(color.new(#ff9800, 0), "Model disagrees", group = GRP_D, inline = "grade2")
+colNeutral = input.color(color.new(#9e9e9e, 0), "Undecided", group = GRP_D, inline = "grade2")
+
+// ───────────────────────────── Constants ─────────────────────────────
+
+// Logit change from a close at the image low to one at the image high under the
+// prior. Keeps P(up) within about 0.44-0.56, the range implied by the ~53%
+// directional accuracy the paper reports. A scale, not a fitted value.
+PRIOR_STRENGTH = 0.5
+N_CH = 6  // open, high, low, close, ma, volume
+IMG_ROWS = 32
+IMG_VOL_ROWS = 6
+IMG_PRICE_ROWS = IMG_ROWS - IMG_VOL_ROWS - 1  // one blank row between price and volume
+
+// ───────────────────────────── Functions ─────────────────────────────
+
+posOf(string s) =>
+    switch s
+        "Top right" => position.top_right
+        "Top left" => position.top_left
+        "Bottom right" => position.bottom_right
+        => position.bottom_left
+
+// Weights for the unfitted prior: only the newest close's place in the image.
+// P(up) = sigmoid(PRIOR_STRENGTH * (0.5 - closePosition)).
+priorWeights(int n) =>
+    array<float> w = array.new<float>(1 + N_CH * n, 0.0)
+    w.set(0, PRIOR_STRENGTH / 2.0)
+    w.set(1 + N_CH * (n - 1) + 3, -PRIOR_STRENGTH)
+    w
+
+// Tokens are split on commas, spaces, newlines and semicolons. "N=.." and "h=.."
+// are metadata; every other token that reads as a number is a weight, in order.
+parseWeights(string s) =>
+    string t = str.replace_all(s, "\n", ",")
+    t := str.replace_all(t, " ", ",")
+    t := str.replace_all(t, ";", ",")
+    array<string> toks = str.split(t, ",")
+    array<float> w = array.new<float>()
+    int nTok = na
+    int hTok = na
+    for tok in toks
+        if str.length(tok) > 0
+            if str.startswith(tok, "N=")
+                nTok := int(math.round(str.tonumber(str.substring(tok, 2))))
+            else if str.startswith(tok, "h=")
+                hTok := int(math.round(str.tonumber(str.substring(tok, 2))))
+            else
+                float v = str.tonumber(tok)
+                if not na(v)
+                    w.push(v)
+    [w, nTok, hTok]
+
+// Anchor indices of the tightest line bounding `ys` from above (upper) or below.
+// Monotone-chain convex hull, then the hull edge spanning the window centre:
+// that edge minimises the summed gap between the line and the points.
+hullEdge(array<float> ys, bool upper) =>
+    int cnt = ys.size()
+    array<int> hull = array.new<int>()
+    for i = 0 to cnt - 1
+        float yi = ys.get(i)
+        while hull.size() >= 2
+            int o = hull.get(hull.size() - 2)
+            int a = hull.get(hull.size() - 1)
+            float cr = (a - o) * (yi - ys.get(o)) - (ys.get(a) - ys.get(o)) * (i - o)
+            if (upper and cr >= 0) or (not upper and cr <= 0)
+                hull.pop()
+            else
+                break
+        hull.push(i)
+    float xc = (cnt - 1) / 2.0
+    int i1 = hull.get(0)
+    int i2 = hull.get(1)
+    for j = 0 to hull.size() - 2
+        if hull.get(j) <= xc and hull.get(j + 1) > xc
+            i1 := hull.get(j)
+            i2 := hull.get(j + 1)
+            break
+    [i1, i2]
+
+// Points of `ys` within `tol` of the line through (i1, y1) with `slope`.
+countTouches(array<float> ys, int i1, float y1, float slope, bool upper, float tol) =>
+    int touches = 0
+    for k = 0 to ys.size() - 1
+        float lineY = y1 + slope * (k - i1)
+        float gap = upper ? lineY - ys.get(k) : ys.get(k) - lineY
+        if gap <= tol
+            touches += 1
+    touches
+
+// 1 = the image model agrees with the break, -1 = it disagrees, 0 = undecided.
+gradeOf(int dir, float p) =>
+    int g = 0
+    if not na(p)
+        if dir > 0
+            g := p >= pHi ? 1 : p <= pLo ? -1 : 0
+        else
+            g := p <= pLo ? 1 : p >= pHi ? -1 : 0
+    g
+
+gradeColor(int dir, int grade) =>
+    grade == 1 ? (dir > 0 ? colUpConf : colDnConf) : grade == -1 ? colContra : colNeutral
+
+pct(int num, int den) =>
+    den > 0 ? str.tostring(100.0 * num / den, "0.0") + "% (n=" + str.tostring(den) + ")" : "n/a"
+
+signed(float x, string fmt) =>
+    na(x) ? "n/a" : (x >= 0 ? "+" : "") + str.tostring(x, fmt)
+
+// Image row of a rescaled price (0 = image low, 1 = image high); row 0 is the top.
+priceRow(float y) =>
+    IMG_PRICE_ROWS - 1 - int(math.round(math.max(0.0, math.min(1.0, y)) * (IMG_PRICE_ROWS - 1)))
+
+// ───────────────────────────── Weights ─────────────────────────────
+
+var array<float> wts = array.new<float>()
+var bool fitted = false
+var int wCount = 0
+var int nMeta = na
+var int hMeta = na
+if barstate.isfirst
+    [parsed, nm, hm] = parseWeights(weightsTxt)
+    wCount := parsed.size()
+    nMeta := nm
+    hMeta := hm
+    fitted := wCount == 1 + N_CH * N and (na(nm) or nm == N)
+    if fitted
+        wts := parsed
+    else
+        wts := priorWeights(N)
+
+int hEff = fitted and not na(hMeta) and hMeta >= 1 ? hMeta : hIn
+
+// ───────────────────────────── Image and P(up) ─────────────────────────────
+
+float ma = ta.sma(close, N)
+float vol = nz(volume)
+float hMax = ta.highest(high, N)
+float lMin = ta.lowest(low, N)
+float vMax = ta.highest(vol, N)
+float rng = hMax - lMin
+// The moving average must exist for the image's oldest bar.
+bool imgOk = bar_index >= 2 * N - 2 and rng > 0
+
+array<float> feats = array.new<float>(N_CH * N, 0.0)
+float pUp = na
+if imgOk
+    for k = 0 to N - 1
+        int i = N - 1 - k
+        int b = N_CH * k
+        feats.set(b, (open[i] - lMin) / rng)
+        feats.set(b + 1, (high[i] - lMin) / rng)
+        feats.set(b + 2, (low[i] - lMin) / rng)
+        feats.set(b + 3, (close[i] - lMin) / rng)
+        feats.set(b + 4, math.max(0.0, math.min(1.0, (ma[i] - lMin) / rng)))
+        feats.set(b + 5, vMax > 0 ? vol[i] / vMax : 0.0)
+    float z = wts.get(0)
+    for j = 0 to N_CH * N - 1
+        z += wts.get(j + 1) * feats.get(j)
+    pUp := 1.0 / (1.0 + math.exp(-z))
+
+float closePos = imgOk ? feats.get(N_CH * (N - 1) + 3) : na
+
+// ───────────────────────────── Trendlines ─────────────────────────────
+
+int tlW = tlLenIn == 0 ? N : math.max(2, tlLenIn)
+
+int resBar1 = na
+float resY1 = na
+int resBar2 = na
+float resY2 = na
+float resProj = na
+int supBar1 = na
+float supY1 = na
+int supBar2 = na
+float supY2 = na
+float supProj = na
+string resInfo = "n/a"
+string supInfo = "n/a"
+if bar_index >= tlW
+    // Window [t - W, t - 1]: index k holds the bar W - k bars ago.
+    array<float> hs = array.new<float>(tlW, 0.0)
+    array<float> ls = array.new<float>(tlW, 0.0)
+    for k = 0 to tlW - 1
+        hs.set(k, high[tlW - k])
+        ls.set(k, low[tlW - k])
+    [u1, u2] = hullEdge(hs, true)
+    [d1, d2] = hullEdge(ls, false)
+    resY1 := hs.get(u1)
+    resY2 := hs.get(u2)
+    float resSlope = (resY2 - resY1) / (u2 - u1)
+    resProj := resY1 + resSlope * (tlW - u1)
+    resBar1 := bar_index - tlW + u1
+    resBar2 := bar_index - tlW + u2
+    supY1 := ls.get(d1)
+    supY2 := ls.get(d2)
+    float supSlope = (supY2 - supY1) / (d2 - d1)
+    supProj := supY1 + supSlope * (tlW - d1)
+    supBar1 := bar_index - tlW + d1
+    supBar2 := bar_index - tlW + d2
+    if barstate.islast and showDash
+        // Slopes in image units: image heights per image width, comparable across symbols.
+        float wRange = hs.max() - ls.min()
+        if wRange > 0
+            float tol = touchTolPct / 100.0 * wRange
+            int resTouches = countTouches(hs, u1, resY1, resSlope, true, tol)
+            int supTouches = countTouches(ls, d1, supY1, supSlope, false, tol)
+            resInfo := "slope " + signed(resSlope * (tlW - 1) / wRange, "0.00") + " · " + str.tostring(resTouches) + " touches · close " + signed(100.0 * (close - resProj) / wRange, "0") + "%"
+            supInfo := "slope " + signed(supSlope * (tlW - 1) / wRange, "0.00") + " · " + str.tostring(supTouches) + " touches · close " + signed(100.0 * (close - supProj) / wRange, "0") + "%"
+
+// A raw break is a close beyond the projected line while resistance still sits
+// above support; it becomes a signal when the same side was not broken in the
+// previous `cooldown` bars.
+bool openChannel = resProj > supProj
+bool upRaw = openChannel and close > resProj
+bool dnRaw = openChannel and close < supProj
+var int lastUpRaw = na
+var int lastDnRaw = na
+bool upSig = upRaw and (na(lastUpRaw) or bar_index - lastUpRaw > cooldown)
+bool dnSig = dnRaw and (na(lastDnRaw) or bar_index - lastDnRaw > cooldown)
+if upRaw
+    lastUpRaw := bar_index
+if dnRaw
+    lastDnRaw := bar_index
+int upGrade = gradeOf(1, pUp)
+int dnGrade = gradeOf(-1, pUp)
+
+var array<line> broken = array.new<line>()
+if showBroken and upSig
+    broken.push(line.new(resBar1, resY1, bar_index, resProj, color = gradeColor(1, upGrade), width = 1))
+if showBroken and dnSig
+    broken.push(line.new(supBar1, supY1, bar_index, supProj, color = gradeColor(-1, dnGrade), width = 1))
+while broken.size() > maxBroken
+    line.delete(broken.shift())
+
+var line liveRes = na
+var line liveSup = na
+if barstate.islast and showLive and not na(resProj)
+    if na(liveRes)
+        liveRes := line.new(resBar1, resY1, resBar2, resY2, extend = extend.right, color = colRes, width = 2)
+        liveSup := line.new(supBar1, supY1, supBar2, supY2, extend = extend.right, color = colSup, width = 2)
+    else
+        line.set_xy1(liveRes, resBar1, resY1)
+        line.set_xy2(liveRes, resBar2, resY2)
+        line.set_xy1(liveSup, supBar1, supY1)
+        line.set_xy2(liveSup, supBar2, supY2)
+
+// ───────────────────────────── Scorecard ─────────────────────────────
+// Each bar settles the call made h bars earlier: "up" means close > close[h].
+
+var int nAll = 0
+var int upAll = 0
+var int nHi = 0
+var int upHi = 0
+var int nLo = 0
+var int upLo = 0
+var int nBrkUp = 0
+var int upBrkUp = 0
+var int nBrkDn = 0
+var int upBrkDn = 0
+if bar_index >= hEff
+    int wentUp = close > close[hEff] ? 1 : 0
+    float pPast = pUp[hEff]
+    if not na(pPast)
+        nAll += 1
+        upAll += wentUp
+        if pPast >= pHi
+            nHi += 1
+            upHi += wentUp
+        if pPast <= pLo
+            nLo += 1
+            upLo += wentUp
+    if upSig[hEff]
+        nBrkUp += 1
+        upBrkUp += wentUp
+    if dnSig[hEff]
+        nBrkDn += 1
+        upBrkDn += wentUp
+
+// ───────────────────────────── Plots and alerts ─────────────────────────────
+
+color pColor = color.from_gradient(nz(pUp, 0.5), pLo, pHi, colDnConf, colUpConf)
+plot(pUp, "P(up)", color = pColor, display = display.data_window + display.status_line + display.pine_screener)
+plot(closePos, "Close in image range", display = display.data_window + display.pine_screener)
+plot(resProj, "Resistance at bar", color = colRes, display = display.data_window)
+plot(supProj, "Support at bar", color = colSup, display = display.data_window)
+plotshape(upSig, "Resistance break", shape.triangleup, location.belowbar, color = gradeColor(1, upGrade), size = size.small)
+plotshape(dnSig, "Support break", shape.triangledown, location.abovebar, color = gradeColor(-1, dnGrade), size = size.small)
+barcolor(colorBars and not na(pUp) ? pColor : na)
+
+alertcondition(upSig and upGrade == 1, "Resistance break, model agrees", "{{ticker}} closed above its trendline resistance and the image model leans up.")
+alertcondition(dnSig and dnGrade == 1, "Support break, model agrees", "{{ticker}} closed below its trendline support and the image model leans down.")
+alertcondition(upSig or dnSig, "Any trendline break", "{{ticker}} broke a trendline.")
+alertcondition(ta.crossover(pUp, pHi), "P(up) crossed above high", "{{ticker}}: image-model P(up) rose above the high threshold.")
+alertcondition(ta.crossunder(pUp, pLo), "P(up) crossed below low", "{{ticker}}: image-model P(up) fell below the low threshold.")
+
+// ───────────────────────────── Dashboard ─────────────────────────────
+
+var table dash = table.new(posOf(dashPos), 2, 12, bgcolor = color.new(#131722, 5), frame_color = color.new(#787b86, 50), frame_width = 1, border_color = color.new(#787b86, 80), border_width = 1)
+if barstate.islast and showDash
+    color txt = color.new(#d1d4dc, 0)
+    color dim = color.new(#9598a1, 0)
+    string modelTxt = fitted ? "fitted · " + str.tostring(wCount) + " weights" : wCount == 0 ? "paper prior (unfitted)" : "prior · pasted weights rejected (" + str.tostring(wCount) + ", need " + str.tostring(1 + N_CH * N) + (na(nMeta) ? "" : ", fitted for N=" + str.tostring(nMeta)) + ")"
+    array<string> keys = array.from("Image", "Model", "P(up)", "Close in image", "Close − MA", "Last volume", "Resistance", "Support", "Calls P ≥ high", "Calls P ≤ low", "All bars", "Breaks R / S")
+    float lastVol = imgOk ? feats.get(N_CH * (N - 1) + 5) : na
+    float closeMa = imgOk ? feats.get(N_CH * (N - 1) + 3) - feats.get(N_CH * (N - 1) + 4) : na
+    array<string> vals = array.from("I" + str.tostring(N) + " · h=" + str.tostring(hEff) + " · W=" + str.tostring(tlW), modelTxt, na(pUp) ? "n/a" : str.tostring(pUp, "0.000"), na(closePos) ? "n/a" : str.tostring(100.0 * closePos, "0") + "% of range", na(closeMa) ? "n/a" : signed(closeMa, "0.00") + " of image height", na(lastVol) or vMax <= 0 ? "no volume" : str.tostring(lastVol, "0.00") + " of window max", resInfo, supInfo, "up " + pct(upHi, nHi), "up " + pct(upLo, nLo), "up " + pct(upAll, nAll), "up " + pct(upBrkUp, nBrkUp) + " / " + pct(upBrkDn, nBrkDn))
+    for r = 0 to keys.size() - 1
+        table.cell(dash, 0, r, keys.get(r), text_color = dim, text_size = size.small, text_halign = text.align_left)
+        table.cell(dash, 1, r, vals.get(r), text_color = txt, text_size = size.small, text_halign = text.align_left)
+    table.cell_set_bgcolor(dash, 1, 2, na(pUp) ? color.new(#131722, 5) : color.new(pColor, 60))
+
+// ───────────────────────────── The model's image ─────────────────────────────
+// What the model reads, drawn like the paper's images: per day an open tick,
+// a high-low bar and a close tick (one column per day for N = 60), the moving
+// average, and volume in the bottom panel.
+
+int pxPerDay = N <= 20 ? 3 : 1
+int imgCols = N * pxPerDay
+var table img = table.new(posOf(imgPos), imgCols, IMG_ROWS, bgcolor = color.black, frame_color = color.new(#787b86, 50), frame_width = 1)
+if barstate.islast and showImg and imgOk
+    float totalW = imgSize == "Small" ? 12.0 : imgSize == "Medium" ? 18.0 : 26.0
+    float totalH = imgSize == "Small" ? 14.0 : imgSize == "Medium" ? 20.0 : 28.0
+    float cellW = totalW / imgCols
+    float cellH = totalH / IMG_ROWS
+    for c = 0 to imgCols - 1
+        for r = 0 to IMG_ROWS - 1
+            table.cell(img, c, r, "", width = cellW, height = cellH, bgcolor = color.black)
+    color maCol = color.new(#ffd54f, 0)
+    color volCol = color.new(#b0bec5, 0)
+    for k = 0 to N - 1
+        int b = N_CH * k
+        int col = k * pxPerDay + (pxPerDay == 3 ? 1 : 0)
+        for r = priceRow(feats.get(b + 1)) to priceRow(feats.get(b + 2))
+            table.cell_set_bgcolor(img, col, r, color.white)
+        if pxPerDay == 3
+            table.cell_set_bgcolor(img, col - 1, priceRow(feats.get(b)), color.white)
+            table.cell_set_bgcolor(img, col + 1, priceRow(feats.get(b + 3)), color.white)
+        table.cell_set_bgcolor(img, col, priceRow(feats.get(b + 4)), maCol)
+        int volRows = int(math.round(feats.get(b + 5) * IMG_VOL_ROWS))
+        if volRows > 0
+            for r = IMG_ROWS - volRows to IMG_ROWS - 1
+                table.cell_set_bgcolor(img, col, r, volCol)
